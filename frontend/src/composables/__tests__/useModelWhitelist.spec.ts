@@ -224,6 +224,23 @@ describe('useModelWhitelist', () => {
     expect(getModelsByPlatform('antigravity')).toContain('claude-opus-4-8')
   })
 
+  it('Bedrock 预设使用官方模型 ID 并保留旧型号合法的版本后缀', () => {
+    const presets = getPresetMappingsByPlatform('bedrock')
+    const expected = {
+      'claude-opus-5': 'us.anthropic.claude-opus-5',
+      'claude-opus-4-8': 'us.anthropic.claude-opus-4-8',
+      'claude-opus-4-7': 'us.anthropic.claude-opus-4-7',
+      'claude-sonnet-5': 'us.anthropic.claude-sonnet-5',
+      'claude-opus-4-6': 'us.anthropic.claude-opus-4-6-v1',
+      'claude-opus-4-5-thinking': 'us.anthropic.claude-opus-4-5-20251101-v1:0'
+    }
+
+    // 预设会直接写入账号配置，逐项核对实际保存的目标 ID。
+    for (const [from, to] of Object.entries(expected)) {
+      expect(presets.find(preset => preset.from === from)?.to).toBe(to)
+    }
+  })
+
   it('xAI 模型列表包含 Grok 4.5 官方模型和别名', () => {
     const models = getModelsByPlatform('grok')
 

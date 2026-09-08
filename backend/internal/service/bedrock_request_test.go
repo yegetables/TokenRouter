@@ -174,7 +174,7 @@ func TestIsBedrockClaude45OrNewer(t *testing.T) {
 		expect  bool
 	}{
 		{"us.anthropic.claude-opus-4-6-v1", true},
-		{"us.anthropic.claude-opus-4-8-v1", true},
+		{"us.anthropic.claude-opus-4-8", true},
 		{"anthropic.claude-fable-5", true},
 		{"us.anthropic.claude-sonnet-4-6", true},
 		{"us.anthropic.claude-sonnet-4-5-20250929-v1:0", true},
@@ -185,7 +185,7 @@ func TestIsBedrockClaude45OrNewer(t *testing.T) {
 		{"anthropic.claude-3-haiku-20240307-v1:0", false},
 		// 未来版本应自动支持
 		{"us.anthropic.claude-sonnet-5-0-v1", true},
-		{"us.anthropic.claude-opus-4-7-v1", true},
+		{"us.anthropic.claude-opus-4-7", true},
 		// 旧版本
 		{"anthropic.claude-opus-4-1-v1", false},
 		{"anthropic.claude-sonnet-4-0-v1", false},
@@ -524,7 +524,7 @@ func TestResolveBedrockModelID(t *testing.T) {
 
 		modelID, ok := ResolveBedrockModelID(account, "claude-opus-4-8")
 		require.True(t, ok)
-		assert.Equal(t, "eu.anthropic.claude-opus-4-8-v1", modelID)
+		assert.Equal(t, "eu.anthropic.claude-opus-4-8", modelID)
 	})
 
 	t.Run("默认 Fable 5 映射使用官方 Bedrock 模型 ID", func(t *testing.T) {
@@ -599,6 +599,40 @@ func TestResolveBedrockModelID(t *testing.T) {
 		_, ok := ResolveBedrockModelID(account, "claude-3-5-sonnet-20241022")
 		assert.False(t, ok)
 	})
+}
+
+// 默认别名必须生成官方请求地址，且无版本后缀的模型仍保留新版缓存能力。
+func TestResolveBedrockModelID_OfficialVersionlessModels(t *testing.T) {
+	t.Parallel()
+	for _, model := range []string{"claude-opus-4-7", "claude-opus-4-8", "claude-opus-5", "claude-sonnet-5"} {
+		t.Run(model, func(t *testing.T) {
+			for _, scope := range []struct {
+				name, region, prefix string
+				forceGlobal          bool
+			}{
+				{name: "区域推理", region: "eu-west-1", prefix: "eu"},
+				{name: "全局推理", region: "us-east-1", prefix: "global", forceGlobal: true},
+			} {
+				t.Run(scope.name, func(t *testing.T) {
+					account := &Account{Platform: PlatformAnthropic, Type: AccountTypeBedrock, Credentials: map[string]any{
+						"aws_region": scope.region,
+					}}
+					if scope.forceGlobal {
+						account.Credentials["aws_force_global"] = "true"
+					}
+					modelID, ok := ResolveBedrockModelID(account, model)
+					require.True(t, ok)
+					wantID := scope.prefix + ".anthropic." + model
+					require.Equal(t, wantID, modelID)
+					require.Equal(t, "https://bedrock-runtime."+scope.region+".amazonaws.com/model/"+wantID+"/invoke", BuildBedrockURL(scope.region, modelID, false))
+
+					body, err := PrepareBedrockRequestBody([]byte(`{"system":[{"type":"text","text":"system","cache_control":{"type":"ephemeral","ttl":"1h"}}],"messages":[{"role":"user","content":"hello"}],"max_tokens":16}`), modelID, "")
+					require.NoError(t, err)
+					require.Equal(t, "1h", gjson.GetBytes(body, "system.0.cache_control.ttl").String())
+				})
+			}
+		})
+	}
 }
 
 func TestAutoInjectBedrockBetaTokens(t *testing.T) {
@@ -758,8 +792,8 @@ func TestIsBedrockOpus47OrNewer(t *testing.T) {
 		modelID string
 		expect  bool
 	}{
-		{"us.anthropic.claude-opus-4-8-v1", true},
-		{"us.anthropic.claude-opus-4-7-v1", true},
+		{"us.anthropic.claude-opus-4-8", true},
+		{"us.anthropic.claude-opus-4-7", true},
 		{"us.anthropic.claude-opus-4-6-v1", false},
 		{"us.anthropic.claude-opus-4-5-20251101-v1:0", false},
 		{"us.anthropic.claude-opus-5-0-v1", true},
@@ -795,14 +829,14 @@ func TestSanitizeBedrockThinking(t *testing.T) {
 
 	t.Run("opus 4.7 converts enabled to adaptive", func(t *testing.T) {
 		input := `{"thinking":{"type":"enabled","budget_tokens":10000},"messages":[]}`
-		result := sanitizeBedrockThinking([]byte(input), "us.anthropic.claude-opus-4-7-v1")
+		result := sanitizeBedrockThinking([]byte(input), "us.anthropic.claude-opus-4-7")
 		assert.Equal(t, "adaptive", gjson.GetBytes(result, "thinking.type").String())
 		assert.False(t, gjson.GetBytes(result, "thinking.budget_tokens").Exists())
 	})
 
 	t.Run("opus 4.7 keeps adaptive unchanged", func(t *testing.T) {
 		input := `{"thinking":{"type":"adaptive"},"messages":[]}`
-		result := sanitizeBedrockThinking([]byte(input), "us.anthropic.claude-opus-4-7-v1")
+		result := sanitizeBedrockThinking([]byte(input), "us.anthropic.claude-opus-4-7")
 		assert.Equal(t, "adaptive", gjson.GetBytes(result, "thinking.type").String())
 	})
 
@@ -822,7 +856,7 @@ func TestSanitizeBedrockThinking(t *testing.T) {
 
 	t.Run("no thinking field unchanged", func(t *testing.T) {
 		input := `{"messages":[]}`
-		result := sanitizeBedrockThinking([]byte(input), "us.anthropic.claude-opus-4-7-v1")
+		result := sanitizeBedrockThinking([]byte(input), "us.anthropic.claude-opus-4-7")
 		assert.JSONEq(t, input, string(result))
 	})
 
@@ -894,32 +928,32 @@ func TestSanitizeBedrockToolUseIDs(t *testing.T) {
 func TestSanitizeBedrockThinking_EdgeCases(t *testing.T) {
 	t.Run("opus 4.7 enabled without budget_tokens converts to adaptive", func(t *testing.T) {
 		input := `{"thinking":{"type":"enabled"},"messages":[]}`
-		result := sanitizeBedrockThinking([]byte(input), "us.anthropic.claude-opus-4-7-v1")
+		result := sanitizeBedrockThinking([]byte(input), "us.anthropic.claude-opus-4-7")
 		assert.Equal(t, "adaptive", gjson.GetBytes(result, "thinking.type").String())
 		assert.False(t, gjson.GetBytes(result, "thinking.budget_tokens").Exists())
 	})
 
 	t.Run("thinking type disabled unchanged", func(t *testing.T) {
 		input := `{"thinking":{"type":"disabled"},"messages":[]}`
-		result := sanitizeBedrockThinking([]byte(input), "us.anthropic.claude-opus-4-7-v1")
+		result := sanitizeBedrockThinking([]byte(input), "us.anthropic.claude-opus-4-7")
 		assert.Equal(t, "disabled", gjson.GetBytes(result, "thinking.type").String())
 	})
 
 	t.Run("thinking type empty string unchanged", func(t *testing.T) {
 		input := `{"thinking":{"type":""},"messages":[]}`
-		result := sanitizeBedrockThinking([]byte(input), "us.anthropic.claude-opus-4-7-v1")
+		result := sanitizeBedrockThinking([]byte(input), "us.anthropic.claude-opus-4-7")
 		assert.JSONEq(t, input, string(result))
 	})
 
 	t.Run("thinking is not an object unchanged", func(t *testing.T) {
 		input := `{"thinking":true,"messages":[]}`
-		result := sanitizeBedrockThinking([]byte(input), "us.anthropic.claude-opus-4-7-v1")
+		result := sanitizeBedrockThinking([]byte(input), "us.anthropic.claude-opus-4-7")
 		assert.JSONEq(t, input, string(result))
 	})
 
 	t.Run("opus 4.7 adaptive with budget_tokens preserved", func(t *testing.T) {
 		input := `{"thinking":{"type":"adaptive","budget_tokens":5000},"messages":[]}`
-		result := sanitizeBedrockThinking([]byte(input), "us.anthropic.claude-opus-4-7-v1")
+		result := sanitizeBedrockThinking([]byte(input), "us.anthropic.claude-opus-4-7")
 		assert.Equal(t, "adaptive", gjson.GetBytes(result, "thinking.type").String())
 		assert.Equal(t, int64(5000), gjson.GetBytes(result, "thinking.budget_tokens").Int())
 	})
@@ -945,8 +979,8 @@ func TestIsBedrockOpus47OrNewer_EdgeCases(t *testing.T) {
 		modelID string
 		expect  bool
 	}{
-		{"anthropic.claude-opus-4-8-v1", true},
-		{"anthropic.claude-opus-4-7-v1", true},
+		{"anthropic.claude-opus-4-8", true},
+		{"anthropic.claude-opus-4-7", true},
 		{"us.anthropic.claude-opus-4-7-20270101-v1:0", true},
 		{"", false},
 		// Forward() 传入的是 parsed.Model（标准模型名），不一定是 Bedrock 模型 ID。
@@ -992,7 +1026,7 @@ func TestPrepareBedrockRequestBodyWithTokens_CCCompat(t *testing.T) {
 	})
 
 	t.Run("ccCompat=true converts thinking to adaptive for opus 4.7", func(t *testing.T) {
-		result, err := PrepareBedrockRequestBodyWithTokens([]byte(input), "us.anthropic.claude-opus-4-7-v1", nil, true)
+		result, err := PrepareBedrockRequestBodyWithTokens([]byte(input), "us.anthropic.claude-opus-4-7", nil, true)
 		require.NoError(t, err)
 		assert.Equal(t, "adaptive", gjson.GetBytes(result, "thinking.type").String())
 		assert.False(t, gjson.GetBytes(result, "thinking.budget_tokens").Exists())

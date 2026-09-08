@@ -691,21 +691,27 @@ func DefaultBetaPolicySettings() *BetaPolicySettings {
 					// Vertex AI 走 normalizeVertexAnthropicModelID 后为 "@YYYYMMDD" 格式
 					"claude-sonnet-5@*",
 					// AWS Bedrock cross-region inference profile
+					// 当前模型 ID 不带版本后缀，精确项不能只由 -* 或 -v* 覆盖。
+					"us.anthropic.claude-sonnet-5",
 					"us.anthropic.claude-sonnet-5-v*",
 					"us.anthropic.claude-sonnet-5-*",
+					"eu.anthropic.claude-sonnet-5",
 					"eu.anthropic.claude-sonnet-5-v*",
 					"eu.anthropic.claude-sonnet-5-*",
 					"apac.anthropic.claude-sonnet-5-v*",
 					"apac.anthropic.claude-sonnet-5-*",
 					"jp.anthropic.claude-sonnet-5-v*",
 					"jp.anthropic.claude-sonnet-5-*",
+					"au.anthropic.claude-sonnet-5",
 					"au.anthropic.claude-sonnet-5-v*",
 					"au.anthropic.claude-sonnet-5-*",
 					"us-gov.anthropic.claude-sonnet-5-v*",
 					"us-gov.anthropic.claude-sonnet-5-*",
+					"global.anthropic.claude-sonnet-5",
 					"global.anthropic.claude-sonnet-5-v*",
 					"global.anthropic.claude-sonnet-5-*",
 					// AWS Bedrock 无 cross-region 前缀
+					"anthropic.claude-sonnet-5",
 					"anthropic.claude-sonnet-5-v*",
 					"anthropic.claude-sonnet-5-*",
 				},
