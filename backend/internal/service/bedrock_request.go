@@ -349,7 +349,7 @@ func removeCustomFieldFromTools(body []byte) []byte {
 
 // claudeVersionRe 匹配 Claude 模型 ID 中的版本号部分
 // 支持 claude-{tier}-{major}-{minor} 和 claude-{tier}-{major}.{minor} 格式
-var claudeVersionRe = regexp.MustCompile(`claude-(?:haiku|sonnet|opus)-(\d+)[-.](\d+)`)
+var claudeVersionRe = regexp.MustCompile(`claude-(?:haiku|sonnet|opus)-(\d+)(?:[-.](\d+))?`)
 
 // isBedrockClaude45OrNewer 判断 Bedrock 模型 ID 是否为 Claude 4.5 或更新版本
 // Claude 4.5+ 支持 cache_control 中的 ttl 字段（"5m" 和 "1h"）
@@ -363,7 +363,10 @@ func isBedrockClaude45OrNewer(modelID string) bool {
 		return false
 	}
 	major, _ := strconv.Atoi(matches[1])
-	minor, _ := strconv.Atoi(matches[2])
+	minor := 0
+	if len(matches) > 2 && matches[2] != "" {
+		minor, _ = strconv.Atoi(matches[2])
+	}
 	return major > 4 || (major == 4 && minor >= 5)
 }
 
@@ -602,7 +605,10 @@ func bedrockModelSupportsToolSearch(modelID string) bool {
 		return false
 	}
 	major, _ := strconv.Atoi(matches[1])
-	minor, _ := strconv.Atoi(matches[2])
+	minor := 0
+	if len(matches) > 2 && matches[2] != "" {
+		minor, _ = strconv.Atoi(matches[2])
+	}
 	return major > 4 || (major == 4 && minor >= 5)
 }
 
@@ -684,7 +690,10 @@ func isBedrockOpus47OrNewer(modelID string) bool {
 		return false
 	}
 	major, _ := strconv.Atoi(matches[1])
-	minor, _ := strconv.Atoi(matches[2])
+	minor := 0
+	if len(matches) > 2 && matches[2] != "" {
+		minor, _ = strconv.Atoi(matches[2])
+	}
 	return major > 4 || (major == 4 && minor >= 7)
 }
 

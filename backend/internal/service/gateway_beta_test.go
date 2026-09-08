@@ -293,6 +293,8 @@ func TestDefaultBetaPolicy_Context1M_Sonnet5Whitelist(t *testing.T) {
 		{"claude-opus-4-8", BetaPolicyActionFilter, "opus must be filtered"},
 		{"claude-opus-4-7", BetaPolicyActionFilter, "opus 4.7 must be filtered"},
 		{"us.anthropic.claude-opus-4-8-v1", BetaPolicyActionFilter, "bedrock opus 4.8 must be filtered"},
+		{"claude-opus-5", BetaPolicyActionFilter, "opus 5 must be filtered"},
+		{"us.anthropic.claude-opus-5-v1", BetaPolicyActionFilter, "bedrock opus 5 must be filtered"},
 		{"claude-haiku-4-5", BetaPolicyActionFilter, "haiku must be filtered"},
 		{"us.anthropic.claude-haiku-4-5-20251001-v1:0", BetaPolicyActionFilter, "bedrock haiku must be filtered"},
 		{"claude-3-5-sonnet-20241022", BetaPolicyActionFilter, "legacy sonnet 3.5 must be filtered"},

@@ -43,3 +43,12 @@ func TestDefaultModels_ContainsClaudeFable51(t *testing.T) {
 	}
 	t.Fatal("expected claude-fable-5-1 to be exposed in DefaultModels")
 }
+
+func TestDefaultModels_ContainsClaudeOpus5(t *testing.T) {
+	for _, model := range DefaultModels {
+		if model.ID == "claude-opus-5" && model.DisplayName == "Claude Opus 5" {
+			return
+		}
+	}
+	t.Fatal("expected claude-opus-5 to be exposed in DefaultModels")
+}
