@@ -64,11 +64,12 @@ func (s *GatewayService) forwardBedrock(
 	reqStream := parsed.Stream
 	body := parsed.Body.Bytes()
 
-	region := bedrockRuntimeRegion(account)
-	mappedModel, ok := ResolveBedrockModelID(account, reqModel)
-	if !ok {
-		return nil, fmt.Errorf("unsupported bedrock model: %s", reqModel)
+	route, err := resolveBedrockModelRoute(account, reqModel)
+	if err != nil {
+		logger.LegacyPrintf("service.gateway", "[Bedrock] %s", bedrockRoutingDiagnostic(err))
+		return nil, err
 	}
+	region, mappedModel := route.SourceRegion, route.ModelID
 	if mappedModel != reqModel {
 		logger.LegacyPrintf("service.gateway", "[Bedrock] Model mapping: %s -> %s (account: %s)", reqModel, mappedModel, account.Name)
 	}

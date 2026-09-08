@@ -8,7 +8,6 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/TokenFlux/TokenRouter/internal/domain"
 	"github.com/TokenFlux/TokenRouter/internal/pkg/claude"
 	"github.com/TokenFlux/TokenRouter/internal/pkg/logger"
 	"github.com/tidwall/gjson"
@@ -22,60 +21,11 @@ const featureKeyBedrockCCCompat = "bedrock_cc_compat"
 
 var bedrockCrossRegionPrefixes = []string{"us.", "eu.", "apac.", "jp.", "au.", "us-gov.", "global."}
 
-// BedrockCrossRegionPrefix 根据 AWS Region 返回 Bedrock 跨区域推理的模型 ID 前缀
-// 参考: https://docs.aws.amazon.com/bedrock/latest/userguide/inference-profiles-support.html
-func BedrockCrossRegionPrefix(region string) string {
-	switch {
-	case strings.HasPrefix(region, "us-gov"):
-		return "us-gov" // GovCloud 使用独立的 us-gov 前缀
-	case strings.HasPrefix(region, "us-"):
-		return "us"
-	case strings.HasPrefix(region, "eu-"):
-		return "eu"
-	case region == "ap-northeast-1":
-		return "jp" // 日本区域使用独立的 jp 前缀（AWS 官方定义）
-	case region == "ap-southeast-2":
-		return "au" // 澳大利亚区域使用独立的 au 前缀（AWS 官方定义）
-	case strings.HasPrefix(region, "ap-"):
-		return "apac" // 其余亚太区域使用通用 apac 前缀
-	case strings.HasPrefix(region, "ca-"):
-		return "us" // 加拿大区域使用 us 前缀的跨区域推理
-	case strings.HasPrefix(region, "sa-"):
-		return "us" // 南美区域使用 us 前缀的跨区域推理
-	default:
-		return "us"
-	}
-}
-
-// AdjustBedrockModelRegionPrefix 将模型 ID 的区域前缀替换为与当前 AWS Region 匹配的前缀
-// 例如 region=eu-west-1 时，"us.anthropic.claude-opus-4-6-v1" → "eu.anthropic.claude-opus-4-6-v1"
-// 特殊值 region="global" 强制使用 global. 前缀
-func AdjustBedrockModelRegionPrefix(modelID, region string) string {
-	var targetPrefix string
-	if region == "global" {
-		targetPrefix = "global"
-	} else {
-		targetPrefix = BedrockCrossRegionPrefix(region)
-	}
-
-	for _, p := range bedrockCrossRegionPrefixes {
-		if strings.HasPrefix(modelID, p) {
-			if p == targetPrefix+"." {
-				return modelID // 前缀已匹配，无需替换
-			}
-			return targetPrefix + "." + modelID[len(p):]
-		}
-	}
-
-	// 模型 ID 没有已知区域前缀（如 "anthropic.claude-..."），不做修改
-	return modelID
-}
-
 func bedrockRuntimeRegion(account *Account) string {
 	if account == nil {
 		return defaultBedrockRegion
 	}
-	if region := account.GetCredential("aws_region"); region != "" {
+	if region := strings.TrimSpace(account.GetCredential("aws_region")); region != "" {
 		return region
 	}
 	return defaultBedrockRegion
@@ -121,44 +71,10 @@ func isLikelyBedrockModelID(modelID string) bool {
 	return isRegionalBedrockModelID(lower)
 }
 
-func normalizeBedrockModelID(modelID string) (normalized string, shouldAdjustRegion bool, ok bool) {
-	modelID = strings.TrimSpace(modelID)
-	if modelID == "" {
-		return "", false, false
-	}
-	if mapped, exists := domain.DefaultBedrockModelMapping[modelID]; exists {
-		return mapped, true, true
-	}
-	if isRegionalBedrockModelID(modelID) {
-		return modelID, true, true
-	}
-	if isLikelyBedrockModelID(modelID) {
-		return modelID, false, true
-	}
-	return "", false, false
-}
-
-// ResolveBedrockModelID resolves a requested Claude model into a Bedrock model ID.
-// It applies account model_mapping first, then default Bedrock aliases, and finally
-// adjusts Anthropic cross-region prefixes to match the account region.
+// ResolveBedrockModelID 为调度与模型目录提供同一条区域解析边界。
 func ResolveBedrockModelID(account *Account, requestedModel string) (string, bool) {
-	if account == nil {
-		return "", false
-	}
-
-	mappedModel := account.GetMappedModel(requestedModel)
-	modelID, shouldAdjustRegion, ok := normalizeBedrockModelID(mappedModel)
-	if !ok {
-		return "", false
-	}
-	if shouldAdjustRegion {
-		targetRegion := bedrockRuntimeRegion(account)
-		if shouldForceBedrockGlobal(account) {
-			targetRegion = "global"
-		}
-		modelID = AdjustBedrockModelRegionPrefix(modelID, targetRegion)
-	}
-	return modelID, true
+	route, err := resolveBedrockModelRoute(account, requestedModel)
+	return route.ModelID, err == nil
 }
 
 // BuildBedrockURL 构建 Bedrock InvokeModel 的 URL

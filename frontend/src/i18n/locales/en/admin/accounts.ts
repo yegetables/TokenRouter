@@ -1162,7 +1162,7 @@ export default {
       bedrockRegion: 'AWS Region',
       bedrockRegionHint: 'e.g. us-east-1, us-west-2, eu-west-1',
       bedrockForceGlobal: 'Force Global cross-region inference',
-      bedrockForceGlobalHint: 'When enabled, model IDs use the global. prefix (e.g. global.anthropic.claude-...), routing requests to any supported region worldwide for higher availability',
+      bedrockForceGlobalHint: 'Uses a supported global. inference ID to route requests across the model’s available regions worldwide. If global inference is unavailable from the selected AWS region, an error is shown without switching inference scope automatically',
       bedrockAccessKeyIdRequired: 'Please enter AWS Access Key ID',
       bedrockSecretAccessKeyRequired: 'Please enter AWS Secret Access Key',
       bedrockRegionRequired: 'Please select AWS Region',

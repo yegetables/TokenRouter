@@ -802,12 +802,12 @@ func (s *AccountTestService) testClaudeVertexServiceAccountConnection(c *gin.Con
 
 // testBedrockAccountConnection tests a Bedrock (SigV4 or API Key) account using non-streaming invoke
 func (s *AccountTestService) testBedrockAccountConnection(c *gin.Context, ctx context.Context, account *Account, testModelID string, prompt string) error {
-	region := bedrockRuntimeRegion(account)
-	resolvedModelID, ok := ResolveBedrockModelID(account, testModelID)
-	if !ok {
-		return s.sendErrorAndEnd(c, fmt.Sprintf("Unsupported Bedrock model: %s", testModelID))
+	route, err := resolveBedrockModelRoute(account, testModelID)
+	if err != nil {
+		return s.sendErrorAndEnd(c, bedrockRoutingDiagnostic(err))
 	}
-	testModelID = resolvedModelID
+	region := route.SourceRegion
+	testModelID = route.ModelID
 
 	// Set SSE headers (test UI expects SSE)
 	c.Writer.Header().Set("Content-Type", "text/event-stream")

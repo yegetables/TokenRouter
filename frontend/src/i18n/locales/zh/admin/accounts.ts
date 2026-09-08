@@ -1217,7 +1217,7 @@ export default {
       bedrockRegion: 'AWS Region',
       bedrockRegionHint: '例如 us-east-1, us-west-2, eu-west-1',
       bedrockForceGlobal: '强制使用 Global 跨区域推理',
-      bedrockForceGlobalHint: '启用后模型 ID 使用 global. 前缀（如 global.anthropic.claude-...），请求可路由到全球任意支持的区域，获得更高可用性',
+      bedrockForceGlobalHint: '启用后使用模型支持的 global. 推理 ID，请求可路由至该模型支持的全球区域。当前 AWS 区域不支持全局推理时会提示错误，不自动切换推理范围',
       bedrockAccessKeyIdRequired: '请输入 AWS Access Key ID',
       bedrockSecretAccessKeyRequired: '请输入 AWS Secret Access Key',
       bedrockRegionRequired: '请选择 AWS Region',
