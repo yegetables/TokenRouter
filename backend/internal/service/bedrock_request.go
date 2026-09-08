@@ -348,7 +348,8 @@ func removeCustomFieldFromTools(body []byte) []byte {
 }
 
 // claudeVersionRe 匹配 Claude 模型 ID 中的版本号部分
-// 支持 claude-{tier}-{major}-{minor} 和 claude-{tier}-{major}.{minor} 格式
+// 支持 claude-{tier}-{major}、claude-{tier}-{major}-{minor} 和 claude-{tier}-{major}.{minor} 格式；
+// 省略 minor 时按 0 处理，以兼容 Claude 5 这类主版本模型 ID。
 var claudeVersionRe = regexp.MustCompile(`claude-(?:haiku|sonnet|opus)-(\d+)(?:[-.](\d+))?`)
 
 // isBedrockClaude45OrNewer 判断 Bedrock 模型 ID 是否为 Claude 4.5 或更新版本
