@@ -18,10 +18,12 @@ type RequestableModel struct {
 
 // RequestableModelsResult 是分组模型解析结果。
 // Restricted 用于区分渠道限制后的空结果与旧版“没有显式模型”语义。
+// Metadata 为上游 /v1/models 声明的上下文元数据（按模型 ID），上游未提供时为 nil。
 type RequestableModelsResult struct {
 	Models                   []RequestableModel
 	Restricted               bool
 	HadExplicitAccountModels bool // 用于保持 /v1/models 的历史响应字段结构。
+	Metadata                 map[string]ModelContextMetadata
 }
 
 // ResolveRequestableModels 统一解析模型列表中的 R -> C -> U 链路。
@@ -99,6 +101,10 @@ func (s *GatewayService) resolveRequestableModelsWithAccounts(
 			result.Models = append(result.Models, resolved)
 		}
 	}
+	// 上游 /v1/models 声明的上下文元数据（缺失时保持 nil，响应结构不变），
+	// 并在后台按 TTL 刷新过期快照，不阻塞本次请求。
+	result.Metadata = s.ModelContextMetadataForAccounts(accounts)
+	s.scheduleUpstreamModelContextRefresh(accounts)
 	return result
 }
 

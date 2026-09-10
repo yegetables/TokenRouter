@@ -14,6 +14,10 @@ type Model struct {
 	OwnedBy     string `json:"owned_by"`
 	Type        string `json:"type"`
 	DisplayName string `json:"display_name"`
+
+	// 上游声明的上下文元数据（可选）：仅当上游 /v1/models 提供时透传，缺失时省略字段。
+	ContextLength       int `json:"context_length,omitempty"`
+	MaxCompletionTokens int `json:"max_completion_tokens,omitempty"`
 }
 
 // DefaultModels 是默认 OpenAI 模型列表。

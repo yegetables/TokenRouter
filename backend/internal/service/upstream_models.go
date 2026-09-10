@@ -578,6 +578,21 @@ type upstreamModelEntry struct {
 	ModelIDSnake string          `json:"model_id"`
 	Name         string          `json:"name"`
 	Meta         json.RawMessage `json:"_meta"`
+
+	// 上下文元数据（可选）：上游 /v1/models 若返回则用于透传，缺失保持 0 表示未知。
+	ContextLength       int `json:"context_length"`
+	ContextWindow       int `json:"context_window"`
+	MaxInputTokens      int `json:"max_input_tokens"`
+	MaxCompletionTokens int `json:"max_completion_tokens"`
+	MaxOutputTokens     int `json:"max_output_tokens"`
+}
+
+// UpstreamModelInfo 上游模型条目及其可选上下文元数据。
+// 字段为 0 表示上游未提供该项，调用方须保持既有响应结构，不得猜测填充。
+type UpstreamModelInfo struct {
+	ID                  string
+	ContextLength       int
+	MaxCompletionTokens int
 }
 
 type upstreamModelEntryMetadata struct {
@@ -597,6 +612,46 @@ func extractGrokUpstreamModelIDs(body []byte) ([]string, error) {
 }
 
 func extractUpstreamModelIDsWithSelector(body []byte, selectID func(upstreamModelEntry) string) ([]string, error) {
+	entries, err := parseUpstreamModelEntries(body)
+	if err != nil {
+		return nil, err
+	}
+	models := make([]string, 0, len(entries))
+	for _, entry := range entries {
+		models = append(models, selectID(entry))
+	}
+	return dedupeAndSortModelIDs(models), nil
+}
+
+// extractUpstreamModelInfos 解析上游模型列表并保留上下文元数据。
+// 与 extractUpstreamModelIDs 使用同一套条目解析规则，额外读取上游声明的上下文字段。
+func extractUpstreamModelInfos(body []byte) ([]UpstreamModelInfo, error) {
+	entries, err := parseUpstreamModelEntries(body)
+	if err != nil {
+		return nil, err
+	}
+	infos := make([]UpstreamModelInfo, 0, len(entries))
+	seen := make(map[string]struct{}, len(entries))
+	for _, entry := range entries {
+		modelID := upstreamModelEntryID(entry)
+		if modelID == "" {
+			continue
+		}
+		if _, ok := seen[modelID]; ok {
+			continue
+		}
+		seen[modelID] = struct{}{}
+		infos = append(infos, UpstreamModelInfo{
+			ID:                  modelID,
+			ContextLength:       firstPositive(entry.ContextLength, entry.ContextWindow, entry.MaxInputTokens),
+			MaxCompletionTokens: firstPositive(entry.MaxCompletionTokens, entry.MaxOutputTokens),
+		})
+	}
+	return infos, nil
+}
+
+// parseUpstreamModelEntries 解析 {data|models:[...]} 或裸数组形态的上游模型列表。
+func parseUpstreamModelEntries(body []byte) ([]upstreamModelEntry, error) {
 	var response struct {
 		Data   []upstreamModelEntry `json:"data"`
 		Models []upstreamModelEntry `json:"models"`
@@ -606,32 +661,29 @@ func extractUpstreamModelIDsWithSelector(body []byte, selectID func(upstreamMode
 		if arrayErr := json.Unmarshal(body, &arrayResponse); arrayErr != nil {
 			return nil, fmt.Errorf("parse upstream model list: %w", err)
 		}
-
-		models := make([]string, 0, len(arrayResponse))
-		for _, entry := range arrayResponse {
-			models = append(models, selectID(entry))
-		}
-		return dedupeAndSortModelIDs(models), nil
+		return arrayResponse, nil
 	}
 
-	models := make([]string, 0, len(response.Data)+len(response.Models))
-	for _, entry := range response.Data {
-		models = append(models, selectID(entry))
-	}
-	for _, entry := range response.Models {
-		models = append(models, selectID(entry))
-	}
-
-	if len(models) == 0 {
+	entries := make([]upstreamModelEntry, 0, len(response.Data)+len(response.Models))
+	entries = append(entries, response.Data...)
+	entries = append(entries, response.Models...)
+	if len(entries) == 0 {
 		var arrayResponse []upstreamModelEntry
 		if err := json.Unmarshal(body, &arrayResponse); err == nil {
-			for _, entry := range arrayResponse {
-				models = append(models, selectID(entry))
-			}
+			entries = append(entries, arrayResponse...)
 		}
 	}
+	return entries, nil
+}
 
-	return dedupeAndSortModelIDs(models), nil
+// firstPositive 返回第一个正数（上游字段别名较多，取先命中的有效值）。
+func firstPositive(values ...int) int {
+	for _, v := range values {
+		if v > 0 {
+			return v
+		}
+	}
+	return 0
 }
 
 func upstreamModelEntryID(entry upstreamModelEntry) string {

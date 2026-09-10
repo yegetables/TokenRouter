@@ -1088,7 +1088,8 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 func (h *GatewayHandler) Models(c *gin.Context) {
 	apiKey, _ := middleware2.GetAPIKeyFromContext(c)
 	if apiKey != nil && apiKey.IsComposite {
-		writeCompositeModelsList(c, h.compositeRequestableModels(c, apiKey, ""))
+		models, metadata := h.compositeRequestableModels(c, apiKey, "")
+		writeCompositeModelsList(c, models, metadata)
 		return
 	}
 
@@ -1106,11 +1107,12 @@ func (h *GatewayHandler) Models(c *gin.Context) {
 	// 统一按渠道映射、账号映射和渠道限制解析真实可请求模型。
 	resolution := h.gatewayService.ResolveRequestableModels(c.Request.Context(), groupID, platform)
 	availableModels := service.RequestableModelIDs(resolution.Models)
+	metadata := resolution.Metadata
 	if apiKey != nil && apiKey.Group != nil && apiKey.Group.CustomModelsListEnabled() {
 		// 自定义列表只能与已通过渠道和账号校验的模型取交集，不能重新加入被拒绝的模型。
 		availableModels = filterModelsByCustomList(availableModels, nil, apiKey.Group.ModelsListConfig.Models)
 		availableModels = service.AppendAPIKeyModelAliases(availableModels, apiKey.ModelMapping)
-		writeCustomModelsList(c, platform, availableModels)
+		writeCustomModelsList(c, platform, availableModels, metadata)
 		return
 	}
 	if apiKey != nil {
@@ -1124,15 +1126,15 @@ func (h *GatewayHandler) Models(c *gin.Context) {
 				writeGrokModelsList(c, availableModels)
 			} else {
 				// 其它平台的账号显式列表继续使用历史 Claude 兼容字段结构。
-				writeModelsList(c, availableModels)
+				writeModelsList(c, availableModels, metadata)
 			}
 		} else {
-			writeDefaultModelsList(c, platform, availableModels)
+			writeDefaultModelsList(c, platform, availableModels, metadata)
 		}
 		return
 	}
 	if resolution.Restricted || groupID != nil {
-		writeModelsList(c, nil)
+		writeModelsList(c, nil, nil)
 		return
 	}
 
@@ -1141,21 +1143,23 @@ func (h *GatewayHandler) Models(c *gin.Context) {
 	if apiKey != nil {
 		fallbackModels = service.AppendAPIKeyModelAliases(fallbackModels, apiKey.ModelMapping)
 	}
-	writeDefaultModelsList(c, platform, fallbackModels)
+	writeDefaultModelsList(c, platform, fallbackModels, nil)
 }
 
 // compositeRequestableModels 按映射顺序聚合可请求模型，并在模型 ID 前添加展示前缀。
 // 严格指定订阅时，列表只能包含套餐覆盖的分组，避免将随后必然拒绝的模型暴露给客户端。
-func (h *GatewayHandler) compositeRequestableModels(c *gin.Context, apiKey *service.APIKey, requiredPlatform string) []string {
+// 返回的元数据键与展示用的带前缀模型 ID 一致。
+func (h *GatewayHandler) compositeRequestableModels(c *gin.Context, apiKey *service.APIKey, requiredPlatform string) ([]string, map[string]service.ModelContextMetadata) {
 	if h == nil || h.gatewayService == nil || c == nil || c.Request == nil || apiKey == nil {
-		return nil
+		return nil, nil
 	}
 	preferredSubscription, ready := compositePreferredSubscription(c, apiKey)
 	if !ready {
-		return nil
+		return nil, nil
 	}
 	ctx := c.Request.Context()
 	models := make([]string, 0)
+	metadata := make(map[string]service.ModelContextMetadata)
 	seen := make(map[string]struct{})
 	for _, binding := range apiKey.CompositeGroups {
 		group := binding.Group
@@ -1176,9 +1180,16 @@ func (h *GatewayHandler) compositeRequestableModels(c *gin.Context, apiKey *serv
 			}
 			seen[prefixed] = struct{}{}
 			models = append(models, prefixed)
+			// 上游上下文元数据同样带前缀，键与返回的模型 ID 对齐。
+			if meta, ok := resolution.Metadata[model]; ok {
+				metadata[prefixed] = meta
+			}
 		}
 	}
-	return models
+	if len(metadata) == 0 {
+		return models, nil
+	}
+	return models, metadata
 }
 
 // compositePreferredSubscription 返回复合 Key 严格指定套餐的认证快照。
@@ -1206,26 +1217,38 @@ func compositeGroupAvailableToUser(apiKey *service.APIKey, preferredSubscription
 }
 
 // writeCompositeModelsList 返回同时兼容 OpenAI 与 Anthropic 常用字段的模型列表。
-func writeCompositeModelsList(c *gin.Context, modelIDs []string) {
+func writeCompositeModelsList(c *gin.Context, modelIDs []string, metadata map[string]service.ModelContextMetadata) {
 	models := make([]gin.H, 0, len(modelIDs))
 	for _, modelID := range modelIDs {
-		models = append(models, gin.H{
+		item := gin.H{
 			"id": modelID, "object": "model", "type": "model", "created": 1704067200,
 			"created_at": "2024-01-01T00:00:00Z", "owned_by": "token-router", "display_name": modelID,
-		})
+		}
+		// 上游声明了上下文信息才追加字段，未提供时保持历史响应结构。
+		if meta, ok := metadata[modelID]; ok {
+			if meta.ContextLength > 0 {
+				item["context_length"] = meta.ContextLength
+			}
+			if meta.MaxCompletionTokens > 0 {
+				item["max_completion_tokens"] = meta.MaxCompletionTokens
+			}
+		}
+		models = append(models, item)
 	}
 	c.JSON(http.StatusOK, gin.H{"object": "list", "data": models})
 }
 
-func writeModelsList(c *gin.Context, modelIDs []string) {
+func writeModelsList(c *gin.Context, modelIDs []string, metadata map[string]service.ModelContextMetadata) {
 	models := make([]claude.Model, 0, len(modelIDs))
 	for _, modelID := range modelIDs {
-		models = append(models, claude.Model{
+		entry := claude.Model{
 			ID:          modelID,
 			Type:        "model",
 			DisplayName: modelID,
 			CreatedAt:   "2024-01-01T00:00:00Z",
-		})
+		}
+		applyClaudeModelContextMetadata(&entry, metadata[modelID])
+		models = append(models, entry)
 	}
 	c.JSON(http.StatusOK, gin.H{
 		"object": "list",
@@ -1234,14 +1257,14 @@ func writeModelsList(c *gin.Context, modelIDs []string) {
 }
 
 // writeCustomModelsList 保持分组自定义列表原有的响应结构。
-func writeCustomModelsList(c *gin.Context, platform string, modelIDs []string) {
+func writeCustomModelsList(c *gin.Context, platform string, modelIDs []string, metadata map[string]service.ModelContextMetadata) {
 	switch platform {
 	case service.PlatformOpenAI:
-		writeOpenAIModelsList(c, modelIDs)
+		writeOpenAIModelsList(c, modelIDs, metadata)
 	case service.PlatformGrok:
 		writeGrokModelsList(c, modelIDs)
 	default:
-		writeModelsList(c, modelIDs)
+		writeModelsList(c, modelIDs, metadata)
 	}
 }
 
@@ -1317,20 +1340,20 @@ func grokModelSupportsConfigurableReasoning(modelID string) bool {
 }
 
 // writeDefaultModelsList 保持各平台默认回退列表原有的响应结构和展示元数据。
-func writeDefaultModelsList(c *gin.Context, platform string, modelIDs []string) {
+func writeDefaultModelsList(c *gin.Context, platform string, modelIDs []string, metadata map[string]service.ModelContextMetadata) {
 	switch platform {
 	case service.PlatformOpenAI:
-		writeOpenAIModelsList(c, modelIDs)
+		writeOpenAIModelsList(c, modelIDs, metadata)
 	case service.PlatformGrok:
 		writeGrokModelsList(c, modelIDs)
 	case service.PlatformAnthropic, service.PlatformGemini, service.PlatformAntigravity, service.PlatformQoder:
-		writeClaudeCompatiblePlatformModelsList(c, platform, modelIDs)
+		writeClaudeCompatiblePlatformModelsList(c, platform, modelIDs, metadata)
 	default:
-		writeModelsList(c, modelIDs)
+		writeModelsList(c, modelIDs, metadata)
 	}
 }
 
-func writeOpenAIModelsList(c *gin.Context, modelIDs []string) {
+func writeOpenAIModelsList(c *gin.Context, modelIDs []string, metadata map[string]service.ModelContextMetadata) {
 	defaultsByID := make(map[string]openai.Model, len(openai.DefaultModels))
 	for _, model := range openai.DefaultModels {
 		defaultsByID[model.ID] = model
@@ -1339,17 +1362,20 @@ func writeOpenAIModelsList(c *gin.Context, modelIDs []string) {
 	models := make([]openai.Model, 0, len(modelIDs))
 	for _, modelID := range modelIDs {
 		if model, ok := defaultsByID[modelID]; ok {
+			applyOpenAIModelContextMetadata(&model, metadata[modelID])
 			models = append(models, model)
 			continue
 		}
-		models = append(models, openai.Model{
+		entry := openai.Model{
 			ID:          modelID,
 			Object:      "model",
 			Created:     1704067200,
 			OwnedBy:     "openai",
 			Type:        "model",
 			DisplayName: modelID,
-		})
+		}
+		applyOpenAIModelContextMetadata(&entry, metadata[modelID])
+		models = append(models, entry)
 	}
 	c.JSON(http.StatusOK, gin.H{
 		"object": "list",
@@ -1357,8 +1383,34 @@ func writeOpenAIModelsList(c *gin.Context, modelIDs []string) {
 	})
 }
 
+// applyOpenAIModelContextMetadata 仅在上游提供该字段时写入，缺失时保持零值（序列化省略）。
+func applyOpenAIModelContextMetadata(model *openai.Model, meta service.ModelContextMetadata) {
+	if model == nil {
+		return
+	}
+	if meta.ContextLength > 0 {
+		model.ContextLength = meta.ContextLength
+	}
+	if meta.MaxCompletionTokens > 0 {
+		model.MaxCompletionTokens = meta.MaxCompletionTokens
+	}
+}
+
+// applyClaudeModelContextMetadata 仅在上游提供该字段时写入，缺失时保持零值（序列化省略）。
+func applyClaudeModelContextMetadata(model *claude.Model, meta service.ModelContextMetadata) {
+	if model == nil {
+		return
+	}
+	if meta.ContextLength > 0 {
+		model.ContextLength = meta.ContextLength
+	}
+	if meta.MaxCompletionTokens > 0 {
+		model.MaxCompletionTokens = meta.MaxCompletionTokens
+	}
+}
+
 // writeClaudeCompatiblePlatformModelsList 保留各平台默认模型的展示元数据。
-func writeClaudeCompatiblePlatformModelsList(c *gin.Context, platform string, modelIDs []string) {
+func writeClaudeCompatiblePlatformModelsList(c *gin.Context, platform string, modelIDs []string, metadata map[string]service.ModelContextMetadata) {
 	defaultsByID := make(map[string]claude.Model)
 	appendDefault := func(id, modelType, displayName, createdAt string) {
 		defaultsByID[id] = claude.Model{
@@ -1391,15 +1443,18 @@ func writeClaudeCompatiblePlatformModelsList(c *gin.Context, platform string, mo
 	models := make([]claude.Model, 0, len(modelIDs))
 	for _, modelID := range modelIDs {
 		if model, ok := defaultsByID[modelID]; ok {
+			applyClaudeModelContextMetadata(&model, metadata[modelID])
 			models = append(models, model)
 			continue
 		}
-		models = append(models, claude.Model{
+		entry := claude.Model{
 			ID:          modelID,
 			Type:        "model",
 			DisplayName: modelID,
 			CreatedAt:   "2024-01-01T00:00:00Z",
-		})
+		}
+		applyClaudeModelContextMetadata(&entry, metadata[modelID])
+		models = append(models, entry)
 	}
 	c.JSON(http.StatusOK, gin.H{
 		"object": "list",
@@ -1522,7 +1577,8 @@ func mergeModelIDs(primary, secondary []string) []string {
 func (h *GatewayHandler) AntigravityModels(c *gin.Context) {
 	apiKey, _ := middleware2.GetAPIKeyFromContext(c)
 	if apiKey != nil && apiKey.IsComposite {
-		writeCompositeModelsList(c, h.compositeRequestableModels(c, apiKey, service.PlatformAntigravity))
+		models, metadata := h.compositeRequestableModels(c, apiKey, service.PlatformAntigravity)
+		writeCompositeModelsList(c, models, metadata)
 		return
 	}
 	var groupID *int64
@@ -1540,18 +1596,18 @@ func (h *GatewayHandler) AntigravityModels(c *gin.Context) {
 			modelIDs = service.AppendAPIKeyModelAliases(modelIDs, apiKey.ModelMapping)
 		}
 		if len(modelIDs) > 0 || resolution.Restricted || groupID != nil {
-			writeClaudeCompatiblePlatformModelsList(c, service.PlatformAntigravity, modelIDs)
+			writeClaudeCompatiblePlatformModelsList(c, service.PlatformAntigravity, modelIDs, resolution.Metadata)
 			return
 		}
 	} else if groupID != nil {
-		writeClaudeCompatiblePlatformModelsList(c, service.PlatformAntigravity, nil)
+		writeClaudeCompatiblePlatformModelsList(c, service.PlatformAntigravity, nil, nil)
 		return
 	}
 	modelIDs := defaultModelIDsForPlatform(service.PlatformAntigravity)
 	if apiKey != nil {
 		modelIDs = service.AppendAPIKeyModelAliases(modelIDs, apiKey.ModelMapping)
 	}
-	writeClaudeCompatiblePlatformModelsList(c, service.PlatformAntigravity, modelIDs)
+	writeClaudeCompatiblePlatformModelsList(c, service.PlatformAntigravity, modelIDs, nil)
 }
 
 func cloneAPIKeyWithGroup(apiKey *service.APIKey, group *service.Group) *service.APIKey {
