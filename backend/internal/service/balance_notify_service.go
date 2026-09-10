@@ -397,6 +397,7 @@ func (s *BalanceNotifyService) sendQuotaAlertEmails(adminEmails []string, accoun
 		dimLabel = dim.name
 	}
 
+	// TODO(币种): 硬编码 $，应为站点货币符号（settings.balance_unit_symbol）。
 	// Format the remaining-based threshold for display
 	thresholdDisplay := fmt.Sprintf("$%.2f", dim.threshold)
 	if dim.thresholdType == thresholdTypePercentage {
@@ -455,6 +456,9 @@ func sanitizeEmailHeader(s string) string {
 	return strings.NewReplacer("\r", "", "\n", "").Replace(s)
 }
 
+// TODO(币种): 模板内的 $（余额 1 处、阈值 2 处共 3 处）是硬编码货币符号，站点币种切成
+// CNY 等不会跟随；待把货币符号作为参数传入（取 settings.balance_unit_symbol），
+// 精度也与 utils/priceFormat.ts 的口径对齐。
 // balanceLowEmailTemplate is the HTML template for balance low notifications.
 // Format args: siteName, userName, userName, balance, threshold, threshold.
 // The recharge button is appended dynamically when rechargeURL is set.
@@ -494,6 +498,7 @@ const balanceLowEmailTemplate = `<!DOCTYPE html>
 </body>
 </html>`
 
+// TODO(币种): 模板内的 $（已使用、剩余额度共 2 处）同为硬编码货币符号，待改为传入的站点货币符号。
 // quotaAlertEmailTemplate is the HTML template for account quota alert notifications.
 // Format args: siteName, accountID, accountName, platform, dimLabel, used, limitStr, remaining, thresholdDisplay.
 const quotaAlertEmailTemplate = `<!DOCTYPE html>
@@ -547,6 +552,7 @@ func (s *BalanceNotifyService) buildBalanceLowEmailBody(userName string, balance
 
 // buildQuotaAlertEmailBody builds HTML email for account quota alert.
 func (s *BalanceNotifyService) buildQuotaAlertEmailBody(accountID int64, accountName, platform, dimLabel string, used, limit, remaining float64, thresholdDisplay, siteName string) string {
+	// TODO(币种): 同上——硬编码 $，应为站点货币符号。
 	limitStr := fmt.Sprintf("$%.2f", limit)
 	if limit <= 0 {
 		limitStr = "无限制 / Unlimited"
