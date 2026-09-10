@@ -1295,6 +1295,43 @@ func convertDeepSeekRate(rate DeepSeekModelRate, usdExchangeRate float64) DeepSe
 	}
 }
 
+// deepSeekFallbackWarnedKey 记录上一次「回退内置常量」告警的原因，
+// 避免计费热路径每个请求都刷同一条日志。
+var deepSeekFallbackWarnedKey atomic.Value // string
+
+// warnDeepSeekBuiltinFallback 在官方价快照不可用、回退内置常量价时告警（同一原因只打一次）。
+// 用途：排查「DeepSeek 官方价怎么没生效」——此前这条回退是静默的。
+func warnDeepSeekBuiltinFallback(model string) {
+	reason := deepSeekBuiltinFallbackReason(model)
+	if last, ok := deepSeekFallbackWarnedKey.Load().(string); ok && last == reason {
+		return
+	}
+	deepSeekFallbackWarnedKey.Store(reason)
+	logger.LegacyPrintf(deepSeekPricingLogScope,
+		"[DeepSeekPricing] %s，已回退内置常量价（人民币口径）；"+
+			"请检查官方定价同步是否成功（日志或 {pricing.data_dir}/deepseek_official_pricing.json）",
+		reason)
+}
+
+// clearDeepSeekBuiltinFallbackWarning 官方价恢复可用后复位告警，便于下次再告警。
+func clearDeepSeekBuiltinFallbackWarning() {
+	if last, ok := deepSeekFallbackWarnedKey.Load().(string); ok && last != "" {
+		deepSeekFallbackWarnedKey.Store("")
+	}
+}
+
+// deepSeekBuiltinFallbackReason 说明为什么取不到官方价（用于告警文案）。
+func deepSeekBuiltinFallbackReason(model string) string {
+	snap := deepSeekOfficial.Load()
+	if snap == nil {
+		return "DeepSeek 官方价快照尚未同步成功"
+	}
+	if _, ok := snap.ratesFor(deepSeekBaseCurrency); !ok {
+		return "DeepSeek 官方价快照缺少人民币基准价"
+	}
+	return fmt.Sprintf("DeepSeek 官方价快照缺少模型族 %q 的人民币基准价", normalizeDeepSeekFamily(model))
+}
+
 // deepSeekOfficialModelFacts 返回官方文档声明的模型能力事实（key: "flash"/"pro"）。
 // 未同步或页面未声明时 ok=false，调用方必须保持既有响应结构、不做推断。
 func deepSeekOfficialModelFacts() (map[string]DeepSeekModelFacts, bool) {

@@ -301,7 +301,7 @@ func resolvedChannelTimeMultiplier(resolved *ResolvedPricing, at time.Time) floa
 var ErrModelPricingUnavailable = errors.New("pricing not found")
 
 // DeepSeek 官方价卡；峰值时段为工作日 UTC 01:00–04:00 与 06:00–10:00
-//（即北京时间 09:00–12:00 与 14:00–18:00），峰值价格是低谷价格的 2 倍。
+// （即北京时间 09:00–12:00 与 14:00–18:00），峰值价格是低谷价格的 2 倍。
 // 实际单价与峰谷时段由 deepseek_official_pricing.go 从官方定价页自动同步，
 // 下列常量仅作为同步不可用时的最终兜底。
 const (
@@ -358,11 +358,14 @@ func applyDeepSeekOfficialPricing(model string, pricing *ModelPricing) *ModelPri
 		cloned.InputPricePerToken = rate.InputOffPeak
 		cloned.OutputPricePerToken = rate.OutputOffPeak
 		cloned.CacheReadPricePerToken = rate.InputCacheHitOffPeak
+		clearDeepSeekBuiltinFallbackWarning()
 		return &cloned
 	}
 	if deepSeekSiteCurrency() != deepSeekFallbackConstantsCurrency {
 		return pricing
 	}
+	// 官方价取不到且站点为人民币口径：回退内置常量，并告警一次（此前是静默回退）。
+	warnDeepSeekBuiltinFallback(model)
 	if isDeepSeekProFamily(model) {
 		cloned.InputPricePerToken = deepseekProOffPeakInputPrice
 		cloned.OutputPricePerToken = deepseekProOffPeakOutputPrice

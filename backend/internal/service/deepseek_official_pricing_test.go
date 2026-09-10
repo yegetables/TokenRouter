@@ -590,6 +590,42 @@ func TestDeepSeekSiteDisplay_ResolverAndCache(t *testing.T) {
 }
 
 // 旧快照残留的币种会被清理，只保留本轮来源产出的币种。
+// 回退内置常量时不再静默：原因文案 + 去重 + 恢复后复位。
+func TestDeepSeekBuiltinFallbackWarning(t *testing.T) {
+	restore := deepSeekOfficial.Load()
+	t.Cleanup(func() {
+		deepSeekOfficial.Store(restore)
+		clearDeepSeekBuiltinFallbackWarning()
+	})
+	useDeepSeekSiteCurrency(t, "CNY")
+	clearDeepSeekBuiltinFallbackWarning()
+
+	// 快照不存在
+	deepSeekOfficial.Store(nil)
+	require.Contains(t, deepSeekBuiltinFallbackReason("deepseek-flash"), "尚未同步成功")
+	warnDeepSeekBuiltinFallback("deepseek-flash")
+	require.Equal(t, "DeepSeek 官方价快照尚未同步成功", deepSeekFallbackWarnedKey.Load())
+
+	// 快照只有美元（缺人民币基准）
+	usdOnly := &DeepSeekOfficialPricing{
+		FetchedAt:   time.Now(),
+		Timezone:    "Asia/Shanghai",
+		PeakWindows: []DeepSeekPeakWindow{{Start: "09:00", End: "12:00"}},
+		Currencies:  map[string]DeepSeekCurrencyRates{"USD": {Currency: "USD", Models: map[string]DeepSeekModelRate{"flash": {InputOffPeak: 1e-6}}}},
+	}
+	deepSeekOfficial.Store(usdOnly)
+	require.Contains(t, deepSeekBuiltinFallbackReason("deepseek-flash"), "缺少人民币基准价")
+
+	// 官方价恢复可用 → 复位，便于下次再告警
+	deepSeekOfficial.Store(parseDeepSeekFixtureSnapshot(t, "deepseek_pricing_zh.html", defaultDeepSeekPricingURL))
+	clearDeepSeekBuiltinFallbackWarning()
+	require.Equal(t, "", deepSeekFallbackWarnedKey.Load())
+
+	pricing := &ModelPricing{InputPricePerToken: 1, OutputPricePerToken: 1, CacheReadPricePerToken: 1}
+	got := applyDeepSeekOfficialPricing("deepseek-flash", pricing)
+	require.InDelta(t, 1e-6, got.InputPricePerToken, 1e-15)
+	require.Equal(t, "", deepSeekFallbackWarnedKey.Load(), "取到官方价时不产生回退告警")
+}
 func TestPruneDeepSeekCurrencies(t *testing.T) {
 	snap := dualCurrencySnapshot(t)
 	require.Equal(t, []string{"CNY", "USD"}, deepSeekSortedCurrencies(snap))
