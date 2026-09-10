@@ -89,6 +89,15 @@ type DeepSeekCurrencyRates struct {
 // 官方 API 的 /v1/models 只返回 id/object/owned_by（实测），不声明上下文与能力，
 // 唯一权威来源是文档定价页的「模型细节」表，因此与价格在同一次抓取中解析。
 // 指针为 nil 表示该页未声明该项，透传时必须省略，不得推断补齐。
+//
+// 有意不下发的三项（不要"补全"它们）：
+//   - supports_reasoning：文档只有整句「思考模式：支持非思考与思考模式（默认）」，
+//     不是逐模型的支持/不支持声明；
+//   - responses_modes：文档只声明「Responses API 支持」，未声明模式清单；
+//   - responses_capabilities：文档无对应的能力明细表。
+//
+// 因而同一模型走基元律动（上游 /v1/models 声明 9 项）与走 DeepSeek 官方
+// （文档声明 6 项）时字段集合不同，这是刻意的：只透传来源明确声明过的事实。
 type DeepSeekModelFacts struct {
 	ContextLength       int   `json:"context_length,omitempty"`
 	MaxCompletionTokens int   `json:"max_completion_tokens,omitempty"`

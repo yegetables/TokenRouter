@@ -35,7 +35,7 @@
 规则：
 
 - 来源限于同一账号的 `GET /v1/models` 响应，仅对 API-Key 型账号尝试：OpenAI 平台与国内供应商用 `Authorization: Bearer`，Anthropic 平台账号用账号配置的认证头（默认 `x-api-key`）加 `anthropic-version`。同一个上游的两条线（OpenAI 线 / anthropic 线）各自取一次，因此两组分组的模型都能带上元数据；数值字段按上表优先级取第一个正值。
-- **DeepSeek 官方账号例外**：其 `/v1/models` 只返回 `id/object/owned_by`，能力与上下文事实取自官方文档页「模型细节」表（与官方价格同源、同一次自动同步），仅对 `platform=deepseek` 账号补齐，其它上游服务的同名模型不受影响；上游若自行声明了某项（含显式 `false`），一律以上游为准。
+- **DeepSeek 官方账号例外**：其 `/v1/models` 只返回 `id/object/owned_by`，能力与上下文事实取自官方文档页「模型细节」表（与官方价格同源、同一次自动同步），仅对 `platform=deepseek` 账号补齐，其它上游服务的同名模型不受影响；上游若自行声明了某项（含显式 `false`），一律以上游为准。文档表未声明 `supports_reasoning` / `responses_modes` / `responses_capabilities`（只有整句「思考模式…」描述与「Responses API 支持」），因此这三项在 DeepSeek 官方账号上**不下发**，也不得据此推断补齐 —— 同一模型走基元律动（上游声明 9 项）与走 DeepSeek 官方（文档声明 6 项）字段集合不同，属预期行为。
 - 快照按账号缓存（TTL 6 小时，持久化在账号 `extra.upstream_models_meta`），刷新在后台异步执行并有单飞保护，失败保留 5 分钟退避；刷新永远不阻塞 `GET /v1/models` 的响应。
 - **只有上游明确声明过的字段才下发**。未声明、值为非正数、空数组、`null`、快照尚未就绪或刷新失败时，响应与历史结构逐字节一致（字段省略）；能力标签用指针区分“未声明”与“显式 false”，不按内置目录、模型名、价格阶梯或客户端能力补齐。
 - 多账号可服务同一模型时逐字段合并补齐；已声明的字段（含显式 `false`）优先，不被其它账号覆盖。
