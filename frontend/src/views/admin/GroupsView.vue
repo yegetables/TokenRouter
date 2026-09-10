@@ -5150,6 +5150,9 @@ const parsePreviewPrice = (value: number | string | null | undefined) => {
   return Number.isFinite(parsed) && parsed >= 0 ? parsed : null;
 };
 
+// TODO(币种): 价格符号硬编码为 $，站点币种切到 CNY 等仍显示 $；且小数处理与
+// utils/priceFormat.ts 的口径不同（这里 toFixed(6) 去尾零、无最少两位）。
+// 待统一为「站点币种符号 + formatPriceNumber」，与模型广场/价格面板保持一致。
 const formatImagePricePreview = (value: number | string | null | undefined) => {
   if (value === null || value === undefined || value === "") {
     return t("admin.groups.imagePricing.notConfigured");
@@ -5161,6 +5164,7 @@ const formatImagePricePreview = (value: number | string | null | undefined) => {
   return `$${price.toFixed(6).replace(/0+$/, "").replace(/\.$/, "")}`;
 };
 
+// TODO(币种): 同 formatImagePricePreview —— 符号硬编码 $、精度口径未统一。
 const formatVideoPricePreview = (value: number | string | null | undefined) => {
   if (value === null || value === undefined || value === "") {
     return t("admin.groups.videoPricing.notConfigured");
