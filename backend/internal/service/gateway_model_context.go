@@ -173,12 +173,17 @@ func (s *GatewayService) scheduleUpstreamModelContextRefresh(accounts []Account)
 	}
 }
 
-// supportsUpstreamModelContextSync 报告账号能否通过 OpenAI 兼容 /v1/models 提供上下文元数据。
+// supportsUpstreamModelContextSync 报告账号能否通过上游 /v1/models 提供可透传元数据。
+//
+// OpenAI 兼容账号（openai 平台与国产 OpenAI 兼容供应商）用 Bearer 取；
+// Anthropic API Key 账号走账号配置的认证头 —— 同一个上游的两条线（如基元律动的
+// OpenAI 线与 anthropic 线）会返回同一份模型清单与上下文信息，因此两侧都要取，
+// 否则 anthropic 线分组的模型拿不到上下文元数据。OAuth 型账号不在此列。
 func supportsUpstreamModelContextSync(account *Account) bool {
 	if account == nil || account.Type != AccountTypeAPIKey {
 		return false
 	}
-	return account.IsOpenAI() || account.IsCNProvider()
+	return account.IsOpenAI() || account.IsCNProvider() || account.Platform == PlatformAnthropic
 }
 
 // refreshUpstreamModelContext 抓取上游 /v1/models 并把上下文元数据写入账号 Extra。
@@ -297,14 +302,33 @@ func applyDeepSeekOfficialModelFacts(models map[string]UpstreamModelMetadata, in
 	}
 }
 
-// buildUpstreamModelContextRequest 构造 OpenAI 兼容的 /v1/models 请求。
-// 与账号真实转发使用同一协议基准地址与鉴权信息，避免 anthropic 协议账号取错端点。
+// buildUpstreamModelContextRequest 构造上游 /v1/models 请求。
+//
+// 鉴权按账号协议取用，与真实转发路径保持一致：
+//   - OpenAI 协议族（openai 平台、国产 OpenAI 兼容供应商）→ Authorization: Bearer
+//   - Anthropic API Key 账号 → 账号配置的认证头（默认 x-api-key）+ anthropic-version，
+//     与 forwardAnthropicAPIKeyPassthrough / 测试连接同源
+//
+// base 取法：
+//   - 其它平台 → GetOpenAIFormatBaseURL()（openai 平台与国产供应商的 OpenAI 格式端点）
+//   - Anthropic 账号 → GetBaseURL()（与 forwardAnthropicAPIKeyPassthrough 同源，
+//     凭据未填时为官方 https://api.anthropic.com），再按 /v1/models 的语义剥离末尾
+//     /anthropic 协议段（该端点属于 OpenAI 格式表面，与 GetOpenAIFormatBaseURL 的
+//     处理一致）；对没有该段的基元律动等中继是空操作。
+//
+// 两处都落在 {base}/v1/models 上。
 func (s *GatewayService) buildUpstreamModelContextRequest(ctx context.Context, account *Account) (*http.Request, error) {
-	apiKey := strings.TrimSpace(account.GetOpenAIProtocolAPIKey())
-	if apiKey == "" {
-		return nil, fmt.Errorf("no upstream API key available")
+	if account == nil {
+		return nil, fmt.Errorf("nil account")
 	}
 	baseURL := strings.TrimSpace(account.GetOpenAIFormatBaseURL())
+	if account.Platform == PlatformAnthropic {
+		// GetOpenAIFormatBaseURL 只为 openai / 国产供应商解析，anthropic 平台返回空。
+		baseURL = strings.TrimSpace(stripCNAnthropicPathSuffix(account.GetBaseURL()))
+		if baseURL == "" {
+			baseURL = strings.TrimSpace(account.GetOpenAIFormatBaseURL())
+		}
+	}
 	if baseURL == "" {
 		return nil, fmt.Errorf("no upstream base url available")
 	}
@@ -317,6 +341,26 @@ func (s *GatewayService) buildUpstreamModelContextRequest(ctx context.Context, a
 		return nil, err
 	}
 	req.Header.Set("Accept", "application/json")
+
+	if account.Platform == PlatformAnthropic {
+		token, tokenType, err := s.GetAccessToken(ctx, account)
+		if err != nil {
+			return nil, err
+		}
+		if tokenType != "apikey" {
+			return nil, fmt.Errorf("anthropic model list requires apikey token, got: %s", tokenType)
+		}
+		// 与 gateway_anthropic_passthrough 一致：版本头与认证头都按原始大小写写入。
+		setHeaderRaw(req.Header, "anthropic-version", "2023-06-01")
+		setAnthropicAPIKeyAuthHeader(req.Header, account, token)
+		account.ApplyHeaderOverrides(req.Header)
+		return req, nil
+	}
+
+	apiKey := strings.TrimSpace(account.GetOpenAIProtocolAPIKey())
+	if apiKey == "" {
+		return nil, fmt.Errorf("no upstream API key available")
+	}
 	req.Header.Set("Authorization", "Bearer "+apiKey)
 	// 账号级请求头覆写：与真实转发保持一致。
 	account.ApplyHeaderOverrides(req.Header)

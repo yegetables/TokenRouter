@@ -33,17 +33,21 @@ func (r *modelContextAccountRepoStub) UpdateExtra(_ context.Context, _ int64, up
 
 type modelContextHTTPUpstreamStub struct {
 	HTTPUpstream
-	body       string
-	statusCode int
-	calls      int
-	lastURL    string
-	lastAuth   string
+	body                 string
+	statusCode           int
+	calls                int
+	lastURL              string
+	lastAuth             string
+	lastAPIKey           string
+	lastAnthropicVersion string
 }
 
 func (s *modelContextHTTPUpstreamStub) Do(req *http.Request, _ string, _ int64, _ int) (*http.Response, error) {
 	s.calls++
 	s.lastURL = req.URL.String()
-	s.lastAuth = req.Header.Get("Authorization")
+	s.lastAuth = getHeaderRaw(req.Header, "Authorization")
+	s.lastAPIKey = getHeaderRaw(req.Header, "x-api-key")
+	s.lastAnthropicVersion = getHeaderRaw(req.Header, "anthropic-version")
 	code := s.statusCode
 	if code == 0 {
 		code = http.StatusOK
@@ -324,6 +328,76 @@ func TestRefreshUpstreamModelContext_DeepSeekOfficialFillsDocumentedFacts(t *tes
 		require.NotContains(t, string(snapshot), "context_length")
 	})
 }
+
+// 上游 /v1/models 的鉴权按账号协议选定：Anthropic API Key 走账号配置的认证头
+// （默认 x-api-key）+ anthropic-version，OpenAI 协议族继续用 Bearer。
+func TestBuildUpstreamModelContextRequest_AuthByProtocol(t *testing.T) {
+	svc := &GatewayService{cfg: &config.Config{}}
+	ctx := context.Background()
+
+	t.Run("Anthropic API Key 默认 x-api-key", func(t *testing.T) {
+		account := &Account{
+			ID: 5, Platform: PlatformAnthropic, Type: AccountTypeAPIKey,
+			Credentials: map[string]any{"base_url": "https://tokenrhythm.studio", "api_key": "sk-tra-key"},
+		}
+		req, err := svc.buildUpstreamModelContextRequest(ctx, account)
+		require.NoError(t, err)
+		require.Equal(t, "https://tokenrhythm.studio/v1/models", req.URL.String())
+		require.Equal(t, "sk-tra-key", getHeaderRaw(req.Header, "x-api-key"))
+		require.Empty(t, getHeaderRaw(req.Header, "Authorization"), "默认不用 Bearer")
+		require.Equal(t, "2023-06-01", getHeaderRaw(req.Header, "anthropic-version"))
+	})
+
+	t.Run("Anthropic API Key 显式 Bearer 方案", func(t *testing.T) {
+		account := &Account{
+			ID: 6, Platform: PlatformAnthropic, Type: AccountTypeAPIKey,
+			Credentials: map[string]any{"base_url": "https://relay.example/anthropic", "api_key": "sk-relay"},
+			Extra:       map[string]any{anthropicAPIKeyAuthSchemeExtraKey: AnthropicAPIKeyAuthSchemeAuthorizationBearer},
+		}
+		req, err := svc.buildUpstreamModelContextRequest(ctx, account)
+		require.NoError(t, err)
+		// 自定义中继剥离末尾 /anthropic 协议段后取 /v1/models
+		require.Equal(t, "https://relay.example/v1/models", req.URL.String())
+		require.Equal(t, "Bearer sk-relay", getHeaderRaw(req.Header, "Authorization"))
+		require.Empty(t, getHeaderRaw(req.Header, "x-api-key"))
+		require.Equal(t, "2023-06-01", getHeaderRaw(req.Header, "anthropic-version"))
+	})
+
+	t.Run("OpenAI 协议族继续 Bearer", func(t *testing.T) {
+		account := &Account{
+			ID: 1, Platform: PlatformOpenAI, Type: AccountTypeAPIKey,
+			Credentials: map[string]any{"base_url": "https://tokenrhythm.studio", "api_key": "sk-openai-line"},
+		}
+		req, err := svc.buildUpstreamModelContextRequest(ctx, account)
+		require.NoError(t, err)
+		require.Equal(t, "https://tokenrhythm.studio/v1/models", req.URL.String())
+		require.Equal(t, "Bearer sk-openai-line", getHeaderRaw(req.Header, "Authorization"))
+		require.Empty(t, getHeaderRaw(req.Header, "anthropic-version"), "OpenAI 协议不带 anthropic-version")
+	})
+}
+
+// Anthropic API Key 账号的刷新链路：认证头正确、上游上下文照常落盘。
+func TestRefreshUpstreamModelContext_AnthropicAPIKeyAccount(t *testing.T) {
+	repo := &modelContextAccountRepoStub{updates: make(chan map[string]any, 1)}
+	upstream := &modelContextHTTPUpstreamStub{body: upstreamModelsWithContext}
+	svc := &GatewayService{accountRepo: repo, httpUpstream: upstream, cfg: &config.Config{}}
+
+	account := &Account{
+		ID: 5, Platform: PlatformAnthropic, Type: AccountTypeAPIKey, Concurrency: 5,
+		Credentials: map[string]any{"base_url": "https://tokenrhythm.studio", "api_key": "sk-tra-key"},
+	}
+	require.NoError(t, svc.refreshUpstreamModelContext(context.Background(), account))
+
+	require.Equal(t, "https://tokenrhythm.studio/v1/models", upstream.lastURL)
+	require.Equal(t, "sk-tra-key", upstream.lastAPIKey)
+	require.Equal(t, "2023-06-01", upstream.lastAnthropicVersion)
+	require.Empty(t, upstream.lastAuth)
+
+	snapshot, err := json.Marshal((<-repo.updates)[upstreamModelContextExtraKey])
+	require.NoError(t, err)
+	require.Contains(t, string(snapshot), `"context_length":200000`)
+	require.Contains(t, string(snapshot), `"supports_tools":true`)
+}
 func TestScheduleUpstreamModelContextRefresh(t *testing.T) {
 	config := &config.Config{}
 
@@ -471,8 +545,11 @@ func TestUpstreamModelMetadataIsZero(t *testing.T) {
 
 func TestSupportsUpstreamModelContextSync(t *testing.T) {
 	require.False(t, supportsUpstreamModelContextSync(nil))
-	require.False(t, supportsUpstreamModelContextSync(&Account{Platform: PlatformAnthropic, Type: AccountTypeAPIKey}))
 	require.False(t, supportsUpstreamModelContextSync(&Account{Platform: PlatformOpenAI, Type: AccountTypeOAuth}))
 	require.True(t, supportsUpstreamModelContextSync(&Account{Platform: PlatformOpenAI, Type: AccountTypeAPIKey}))
 	require.True(t, supportsUpstreamModelContextSync(&Account{Platform: PlatformDeepseek, Type: AccountTypeAPIKey}))
+	// Anthropic API Key 账号同样提供 /v1/models（基元律动 anthropic 线实测同上）
+	require.True(t, supportsUpstreamModelContextSync(&Account{Platform: PlatformAnthropic, Type: AccountTypeAPIKey}))
+	// OAuth 型不在此列（token 走刷新流程，模型列表由其它路径处理）
+	require.False(t, supportsUpstreamModelContextSync(&Account{Platform: PlatformAnthropic, Type: AccountTypeOAuth}))
 }
