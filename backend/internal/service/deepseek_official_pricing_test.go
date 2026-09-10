@@ -92,6 +92,24 @@ func TestParseDeepSeekPricingHTML_ChinesePage(t *testing.T) {
 	require.InDelta(t, 1.35e-5, pro.OutputOffPeak, 1e-12)       // ¥13.5/M
 	require.InDelta(t, 2.0, pro.PeakMultiplier, 1e-9)
 
+	// 模型细节表：上下文长度 1M、输出长度 最大 384K、功能矩阵
+	flashFacts, ok := snap.ModelFacts["flash"]
+	require.True(t, ok)
+	require.Equal(t, 1000000, flashFacts.ContextLength)
+	require.Equal(t, 384000, flashFacts.MaxCompletionTokens)
+	require.True(t, *flashFacts.SupportsTools)     // Tool Calls 支持
+	require.True(t, *flashFacts.SupportsResponses) // Responses API 支持
+	require.True(t, *flashFacts.SupportsAnthropic) // Anthropic API 支持
+	require.True(t, *flashFacts.SupportsVision)    // 图像理解 支持
+
+	proFacts, ok := snap.ModelFacts["pro"]
+	require.True(t, ok)
+	require.Equal(t, 1000000, proFacts.ContextLength)
+	require.Equal(t, 384000, proFacts.MaxCompletionTokens)
+	require.NotNil(t, proFacts.SupportsVision)
+	require.False(t, *proFacts.SupportsVision, "pro 的图像理解不支持，必须保留显式 false")
+	require.True(t, *proFacts.SupportsTools)
+
 	// 高峰时段：北京时间周一至周五 9:00-12:00、14:00-18:00
 	require.Len(t, snap.PeakWindows, 2)
 	require.Equal(t, DeepSeekPeakWindow{Start: "09:00", End: "12:00"}, snap.PeakWindows[0])
@@ -121,12 +139,80 @@ func TestParseDeepSeekPricingHTML_EnglishPage(t *testing.T) {
 	require.InDelta(t, 6.6e-7, pro.InputOffPeak, 1e-12)
 	require.InDelta(t, 1.98e-6, pro.OutputOffPeak, 1e-12)
 
+	// 英文页同样解析模型细节表（CONTEXT LENGTH / MAX OUTPUT / Vision）
+	enFlash := snap.ModelFacts["flash"]
+	require.Equal(t, 1000000, enFlash.ContextLength)
+	require.Equal(t, 384000, enFlash.MaxCompletionTokens)
+	require.True(t, *enFlash.SupportsTools)
+	require.True(t, *enFlash.SupportsVision) // ✓
+	enPro := snap.ModelFacts["pro"]
+	require.NotNil(t, enPro.SupportsVision)
+	require.False(t, *enPro.SupportsVision, "Not supported → 显式 false")
+
 	// 高峰时段：UTC 01:00-04:00、06:00-10:00（工作日）
 	require.Len(t, snap.PeakWindows, 2)
 	require.Equal(t, DeepSeekPeakWindow{Start: "01:00", End: "04:00"}, snap.PeakWindows[0])
 	require.Equal(t, DeepSeekPeakWindow{Start: "06:00", End: "10:00"}, snap.PeakWindows[1])
 }
 
+// 模型细节表解析的边界：措辞不明确按未声明处理；colspan 单值行两族共用。
+func TestParseDeepSeekModelFacts_EdgeCases(t *testing.T) {
+	cells := []string{
+		"上下文长度", "128K", // 单值行（colspan）→ 两族共用
+		"输出长度", "最大 8K",
+		"Tool Calls", "支持", "仅非思考模式支持", // 第二族措辞不明确 → 未声明
+		"Vision", "✓", "✗",
+	}
+	facts := parseDeepSeekModelFacts(cells)
+
+	require.Equal(t, 128000, facts["flash"].ContextLength)
+	require.Equal(t, 128000, facts["pro"].ContextLength, "colspan 单值行两族共用")
+	require.Equal(t, 8000, facts["flash"].MaxCompletionTokens)
+	require.Equal(t, 8000, facts["pro"].MaxCompletionTokens)
+
+	require.NotNil(t, facts["flash"].SupportsTools)
+	require.True(t, *facts["flash"].SupportsTools)
+	require.Nil(t, facts["pro"].SupportsTools, "「仅非思考模式支持」不是明确的支持/不支持，按未声明处理")
+
+	require.True(t, *facts["flash"].SupportsVision)
+	require.False(t, *facts["pro"].SupportsVision)
+
+	// 页面完全没有这些行时不产生任何事实
+	require.Empty(t, parseDeepSeekModelFacts([]string{"模型", "deepseek-flash"}))
+}
+
+func TestParseDeepSeekTokenQuantity(t *testing.T) {
+	cases := map[string]int{
+		"1M": 1000000, "128K": 128000, "最大 384K": 384000,
+		"MAXIMUM: 384K": 384000, "1,000,000": 1000000, "200000": 200000,
+	}
+	for raw, want := range cases {
+		got, ok := parseDeepSeekTokenQuantity(raw)
+		require.True(t, ok, raw)
+		require.Equal(t, want, got, raw)
+	}
+	for _, raw := range []string{"", "-", "—", "支持", "Max", "不支持"} {
+		_, ok := parseDeepSeekTokenQuantity(raw)
+		require.False(t, ok, raw)
+	}
+}
+
+func TestParseDeepSeekSupportFlag(t *testing.T) {
+	for _, yes := range []string{"支持", "✓", "Yes", "Supported"} {
+		flag, ok := parseDeepSeekSupportFlag(yes)
+		require.True(t, ok, yes)
+		require.True(t, *flag, yes)
+	}
+	for _, no := range []string{"不支持", "✗", "Not supported", "No"} {
+		flag, ok := parseDeepSeekSupportFlag(no)
+		require.True(t, ok, no)
+		require.False(t, *flag, no)
+	}
+	for _, unknown := range []string{"", "-", "仅非思考模式支持", "Non-thinking mode only"} {
+		_, ok := parseDeepSeekSupportFlag(unknown)
+		require.False(t, ok, unknown)
+	}
+}
 func TestValidateDeepSeekOfficialPricing_RejectsInvalid(t *testing.T) {
 	valid := func() *DeepSeekOfficialPricing {
 		return &DeepSeekOfficialPricing{

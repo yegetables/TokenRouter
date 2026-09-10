@@ -219,7 +219,12 @@ func TestRefreshUpstreamModelContextPersistsAndSkipsUpstreamWithoutContext(t *te
 		require.NotContains(t, string(snapshot), "plain-model", "未声明任何元数据的模型不落快照")
 	})
 
-	t.Run("上游不提供上下文时写入空快照以生效 TTL", func(t *testing.T) {
+	t.Run("上游不提供元数据且无官方事实时写入空快照以生效 TTL", func(t *testing.T) {
+		// 前置：官方文档事实快照为空（否则 DeepSeek 官方账号会由官方文档补齐，见下一条用例）
+		restore := deepSeekOfficial.Load()
+		deepSeekOfficial.Store(nil)
+		t.Cleanup(func() { deepSeekOfficial.Store(restore) })
+
 		repo := &modelContextAccountRepoStub{updates: make(chan map[string]any, 1)}
 		upstream := &modelContextHTTPUpstreamStub{body: upstreamModelsWithoutContext}
 		svc := &GatewayService{accountRepo: repo, httpUpstream: upstream, cfg: config}
@@ -240,6 +245,85 @@ func TestRefreshUpstreamModelContextPersistsAndSkipsUpstreamWithoutContext(t *te
 	})
 }
 
+// DeepSeek 官方上游 /v1/models 只返回 id（实测），上下文与能力事实由官方文档页
+// 「模型细节」表补齐；其它平台账号即使服务同名模型也不得套用官方口径。
+func TestRefreshUpstreamModelContext_DeepSeekOfficialFillsDocumentedFacts(t *testing.T) {
+	config := &config.Config{}
+	idOnlyBody := `{"object":"list","data":[
+		{"id":"deepseek-flash","object":"model","owned_by":"deepseek"},
+		{"id":"deepseek-v4-pro","object":"model","owned_by":"deepseek"}
+	]}`
+
+	enabled, disabled := true, false
+	storeFacts := func(t *testing.T) {
+		t.Helper()
+		restore := deepSeekOfficial.Load()
+		t.Cleanup(func() { deepSeekOfficial.Store(restore) })
+		deepSeekOfficial.Store(&DeepSeekOfficialPricing{
+			FetchedAt:    time.Now(),
+			Timezone:     "Asia/Shanghai",
+			WeekdaysOnly: true,
+			PeakWindows:  []DeepSeekPeakWindow{{Start: "09:00", End: "12:00"}},
+			Currencies: map[string]DeepSeekCurrencyRates{
+				"CNY": {
+					Currency: "CNY", FetchedAt: time.Now(),
+					Models: map[string]DeepSeekModelRate{
+						"flash": {InputOffPeak: 1e-6, InputCacheHitOffPeak: 2e-8, OutputOffPeak: 4e-6, PeakMultiplier: 2},
+					},
+				},
+			},
+			ModelFacts: map[string]DeepSeekModelFacts{
+				"flash": {ContextLength: 1000000, MaxCompletionTokens: 384000,
+					SupportsVision: &enabled, SupportsTools: &enabled,
+					SupportsResponses: &enabled, SupportsAnthropic: &enabled},
+				"pro": {ContextLength: 1000000, MaxCompletionTokens: 384000,
+					SupportsVision: &disabled, SupportsTools: &enabled,
+					SupportsResponses: &enabled, SupportsAnthropic: &enabled},
+			},
+		})
+	}
+
+	t.Run("DeepSeek 官方账号用文档事实补齐", func(t *testing.T) {
+		storeFacts(t)
+		repo := &modelContextAccountRepoStub{updates: make(chan map[string]any, 1)}
+		upstream := &modelContextHTTPUpstreamStub{body: idOnlyBody}
+		svc := &GatewayService{accountRepo: repo, httpUpstream: upstream, cfg: config}
+
+		account := &Account{ID: 21, Platform: PlatformDeepseek, Type: AccountTypeAPIKey,
+			Credentials: map[string]any{"base_url": "https://api.deepseek.com", "api_key": "sk-test-key"}}
+		require.NoError(t, svc.refreshUpstreamModelContext(context.Background(), account))
+
+		snapshot, err := json.Marshal((<-repo.updates)[upstreamModelContextExtraKey])
+		require.NoError(t, err)
+		require.Contains(t, string(snapshot), `"deepseek-flash"`)
+		require.Contains(t, string(snapshot), `"deepseek-v4-pro"`)
+		require.Contains(t, string(snapshot), `"context_length":1000000`)
+		require.Contains(t, string(snapshot), `"max_completion_tokens":384000`)
+		require.Contains(t, string(snapshot), `"supports_tools":true`)
+		require.Contains(t, string(snapshot), `"supports_responses":true`)
+		require.Contains(t, string(snapshot), `"supports_anthropic":true`)
+		// flash 支持图像理解，pro 不支持：两个模型族的取值必须各自独立
+		require.Contains(t, string(snapshot), `"supports_vision":true`)
+		require.Contains(t, string(snapshot), `"supports_vision":false`)
+	})
+
+	t.Run("其它平台账号不套用 DeepSeek 官方口径", func(t *testing.T) {
+		storeFacts(t)
+		repo := &modelContextAccountRepoStub{updates: make(chan map[string]any, 1)}
+		upstream := &modelContextHTTPUpstreamStub{body: idOnlyBody}
+		svc := &GatewayService{accountRepo: repo, httpUpstream: upstream, cfg: config}
+
+		// 同为 openai 平台的 TokenRhythm 也服务 deepseek-* 同名模型，但声明必须来自它自己
+		account := &Account{ID: 22, Platform: PlatformOpenAI, Type: AccountTypeAPIKey,
+			Credentials: map[string]any{"base_url": "https://tokenrhythm.studio", "api_key": "sk-test-key"}}
+		require.NoError(t, svc.refreshUpstreamModelContext(context.Background(), account))
+
+		snapshot, err := json.Marshal((<-repo.updates)[upstreamModelContextExtraKey])
+		require.NoError(t, err)
+		require.Contains(t, string(snapshot), `"models":{}`)
+		require.NotContains(t, string(snapshot), "context_length")
+	})
+}
 func TestScheduleUpstreamModelContextRefresh(t *testing.T) {
 	config := &config.Config{}
 

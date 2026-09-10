@@ -235,6 +235,13 @@ func (s *GatewayService) refreshUpstreamModelContext(ctx context.Context, accoun
 		models[info.ID] = meta
 	}
 
+	// DeepSeek 官方上游的 /v1/models 只返回 id/object/owned_by（实测），不声明上下文
+	// 与能力；这些事实来自官方文档页「模型细节」表（与价格同源、同一次抓取同步）。
+	// 仅对 DeepSeek 官方账号补齐，避免把官方口径套到其它上游服务的同名模型上。
+	if account.Platform == PlatformDeepseek {
+		applyDeepSeekOfficialModelFacts(models, infos)
+	}
+
 	snap := upstreamModelContextSnapshot{
 		FetchedAt: time.Now().UTC().Format(time.RFC3339),
 		Source:    "account_upstream_models",
@@ -247,6 +254,47 @@ func (s *GatewayService) refreshUpstreamModelContext(ctx context.Context, accoun
 	return s.accountRepo.UpdateExtra(ctx, account.ID, map[string]any{
 		upstreamModelContextExtraKey: json.RawMessage(payload),
 	})
+}
+
+// applyDeepSeekOfficialModelFacts 用官方文档声明的事实补齐 DeepSeek 官方账号的模型元数据。
+//
+// 只填补上游未声明的字段：上游若自行声明了某项（含显式 false），一律以其为准。
+// 事实按模型族归属，因此官方文档说明“旧模型名仍由当前模型提供服务”的同族别名
+// （如 deepseek-v4-flash → flash 族）同样适用。
+func applyDeepSeekOfficialModelFacts(models map[string]UpstreamModelMetadata, infos []UpstreamModelInfo) {
+	facts, ok := deepSeekOfficialModelFacts()
+	if !ok {
+		return
+	}
+	for _, info := range infos {
+		fact, ok := facts[normalizeDeepSeekFamily(info.ID)]
+		if !ok || fact.isZero() {
+			continue
+		}
+		meta := models[info.ID]
+		if meta.ContextLength <= 0 {
+			meta.ContextLength = fact.ContextLength
+		}
+		if meta.MaxCompletionTokens <= 0 {
+			meta.MaxCompletionTokens = fact.MaxCompletionTokens
+		}
+		if meta.SupportsVision == nil {
+			meta.SupportsVision = fact.SupportsVision
+		}
+		if meta.SupportsTools == nil {
+			meta.SupportsTools = fact.SupportsTools
+		}
+		if meta.SupportsResponses == nil {
+			meta.SupportsResponses = fact.SupportsResponses
+		}
+		if meta.SupportsAnthropic == nil {
+			meta.SupportsAnthropic = fact.SupportsAnthropic
+		}
+		if meta.isZero() {
+			continue
+		}
+		models[info.ID] = meta
+	}
 }
 
 // buildUpstreamModelContextRequest 构造 OpenAI 兼容的 /v1/models 请求。

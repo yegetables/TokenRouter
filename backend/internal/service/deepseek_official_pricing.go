@@ -31,6 +31,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"net/url"
 	"os"
@@ -69,10 +70,10 @@ type DeepSeekPeakWindow struct {
 
 // DeepSeekModelRate 单模型官方空闲时段单价（单位：货币/token）与高峰倍率
 type DeepSeekModelRate struct {
-	InputOffPeak         float64 `json:"input_off_peak"`             // 输入（缓存未命中）
-	InputCacheHitOffPeak float64 `json:"input_cache_hit_off_peak"`   // 输入（缓存命中）
-	OutputOffPeak        float64 `json:"output_off_peak"`            // 输出
-	PeakMultiplier       float64 `json:"peak_multiplier"`            // 高峰倍率（官方为 2）
+	InputOffPeak         float64 `json:"input_off_peak"`           // 输入（缓存未命中）
+	InputCacheHitOffPeak float64 `json:"input_cache_hit_off_peak"` // 输入（缓存命中）
+	OutputOffPeak        float64 `json:"output_off_peak"`          // 输出
+	PeakMultiplier       float64 `json:"peak_multiplier"`          // 高峰倍率（官方为 2）
 }
 
 // DeepSeekCurrencyRates 单一币种的官方价格与来源（一个币种对应一个官方定价页）。
@@ -81,6 +82,27 @@ type DeepSeekCurrencyRates struct {
 	SourceURL string                       `json:"source_url"` // 该币种价格的来源页面
 	FetchedAt time.Time                    `json:"fetched_at"`
 	Models    map[string]DeepSeekModelRate `json:"models"` // key: "flash" / "pro"
+}
+
+// DeepSeekModelFacts 官方文档声明的模型能力事实（与币种无关，按模型族保存）。
+//
+// 官方 API 的 /v1/models 只返回 id/object/owned_by（实测），不声明上下文与能力，
+// 唯一权威来源是文档定价页的「模型细节」表，因此与价格在同一次抓取中解析。
+// 指针为 nil 表示该页未声明该项，透传时必须省略，不得推断补齐。
+type DeepSeekModelFacts struct {
+	ContextLength       int   `json:"context_length,omitempty"`
+	MaxCompletionTokens int   `json:"max_completion_tokens,omitempty"`
+	SupportsVision      *bool `json:"supports_vision,omitempty"`
+	SupportsTools       *bool `json:"supports_tools,omitempty"`
+	SupportsResponses   *bool `json:"supports_responses,omitempty"`
+	SupportsAnthropic   *bool `json:"supports_anthropic,omitempty"`
+}
+
+// isZero 报告该模型族是否没有任何已声明事实。
+func (f DeepSeekModelFacts) isZero() bool {
+	return f.ContextLength <= 0 && f.MaxCompletionTokens <= 0 &&
+		f.SupportsVision == nil && f.SupportsTools == nil &&
+		f.SupportsResponses == nil && f.SupportsAnthropic == nil
 }
 
 // DeepSeekOfficialPricing 官方定价与峰谷快照（按币种保存多套价格）。
@@ -94,6 +116,10 @@ type DeepSeekOfficialPricing struct {
 	WeekdaysOnly bool                             `json:"weekdays_only"` // 高峰仅工作日
 	PeakWindows  []DeepSeekPeakWindow             `json:"peak_windows"`
 	Currencies   map[string]DeepSeekCurrencyRates `json:"currencies"` // key: "CNY" / "USD"
+
+	// ModelFacts 模型能力事实（key: "flash" / "pro"）。与币种、与价格无关，
+	// 用于 DeepSeek 官方账号的 /v1/models 元数据透传。
+	ModelFacts map[string]DeepSeekModelFacts `json:"model_facts,omitempty"`
 
 	// 以下为 v1 单币种快照的兼容字段：读盘时迁移进 Currencies，之后不再写入。
 	Currency  string                       `json:"currency,omitempty"`
@@ -179,11 +205,13 @@ func cloneDeepSeekPricing(src *DeepSeekOfficialPricing) *DeepSeekOfficialPricing
 
 // deepSeekOfficialJSONPayload 未来若官方提供 JSON API 时的期望结构
 type deepSeekOfficialJSONPayload struct {
-	Currency     string          `json:"currency"`
-	Timezone     string          `json:"timezone"`
-	WeekdaysOnly *bool           `json:"weekdays_only"`
+	Currency     string               `json:"currency"`
+	Timezone     string               `json:"timezone"`
+	WeekdaysOnly *bool                `json:"weekdays_only"`
 	PeakWindows  []DeepSeekPeakWindow `json:"peak_windows"`
-	Models       map[string]struct {
+	// ModelFacts 可选的模型能力事实（key: "flash"/"pro"），字段含义同 DeepSeekModelFacts。
+	ModelFacts map[string]DeepSeekModelFacts `json:"model_facts"`
+	Models     map[string]struct {
 		InputOffPeak         float64 `json:"input_off_peak"`
 		InputCacheHitOffPeak float64 `json:"input_cache_hit_off_peak"`
 		OutputOffPeak        float64 `json:"output_off_peak"`
@@ -269,7 +297,7 @@ func refreshDeepSeekOfficialPricing(cfg *config.Config) {
 	}
 
 	updated := make(map[string]struct{})
-	windowsFromSource := false
+	snapshotFieldsApplied := false
 	var lastErr error
 	for _, src := range deepSeekPricingSourceURLs(cfg) {
 		parsed, err := fetchDeepSeekOfficialPricing(cfg, src)
@@ -281,7 +309,7 @@ func refreshDeepSeekOfficialPricing(cfg *config.Config) {
 		}
 		// 峰谷时段只采纳本轮第一个成功来源：来源顺序固定，避免中文页（北京时间）
 		// 与英文页（UTC）的等价表示互相覆盖。
-		currency, err := mergeDeepSeekSourceSnapshot(next, parsed, !windowsFromSource)
+		currency, err := mergeDeepSeekSourceSnapshot(next, parsed, !snapshotFieldsApplied)
 		if err != nil {
 			lastErr = err
 			logger.LegacyPrintf(deepSeekPricingLogScope,
@@ -289,8 +317,8 @@ func refreshDeepSeekOfficialPricing(cfg *config.Config) {
 			continue
 		}
 		updated[currency] = struct{}{}
-		if len(parsed.PeakWindows) > 0 {
-			windowsFromSource = true
+		if len(parsed.PeakWindows) > 0 || len(parsed.ModelFacts) > 0 {
+			snapshotFieldsApplied = true
 		}
 	}
 
@@ -321,9 +349,10 @@ func refreshDeepSeekOfficialPricing(cfg *config.Config) {
 }
 
 // mergeDeepSeekSourceSnapshot 把单源解析结果合并进目标快照，返回该来源的币种。
-// applyWindows 为 true 时同时采纳该来源的峰谷时段（快照级字段）。
+// applySnapshotFields 为 true 时同时采纳该来源的「快照级」字段：峰谷时段与模型能力
+// 事实（中英文页内容等价，故只取本轮第一个成功来源，避免两个页面互相覆盖）。
 // 单币种校验不通过时返回错误，且不修改目标快照。
-func mergeDeepSeekSourceSnapshot(dst, src *DeepSeekOfficialPricing, applyWindows bool) (string, error) {
+func mergeDeepSeekSourceSnapshot(dst, src *DeepSeekOfficialPricing, applySnapshotFields bool) (string, error) {
 	if dst == nil || src == nil {
 		return "", fmt.Errorf("nil snapshot")
 	}
@@ -338,13 +367,18 @@ func mergeDeepSeekSourceSnapshot(dst, src *DeepSeekOfficialPricing, applyWindows
 	if err := validateDeepSeekCurrencyRates(currency, rates); err != nil {
 		return "", err
 	}
-	if applyWindows && len(src.PeakWindows) > 0 {
-		if err := validateDeepSeekPeakWindows(src.Timezone, src.PeakWindows); err != nil {
-			return "", err
+	if applySnapshotFields {
+		if len(src.PeakWindows) > 0 {
+			if err := validateDeepSeekPeakWindows(src.Timezone, src.PeakWindows); err != nil {
+				return "", err
+			}
+			dst.Timezone = src.Timezone
+			dst.WeekdaysOnly = src.WeekdaysOnly
+			dst.PeakWindows = src.PeakWindows
 		}
-		dst.Timezone = src.Timezone
-		dst.WeekdaysOnly = src.WeekdaysOnly
-		dst.PeakWindows = src.PeakWindows
+		if facts := validateDeepSeekModelFacts(src.ModelFacts); len(facts) > 0 {
+			dst.ModelFacts = facts
+		}
 	}
 	if dst.Currencies == nil {
 		dst.Currencies = map[string]DeepSeekCurrencyRates{}
@@ -479,6 +513,9 @@ func parseDeepSeekPricingJSON(body []byte, src string) (*DeepSeekOfficialPricing
 			currency: {Currency: currency, SourceURL: src, FetchedAt: now, Models: models},
 		},
 	}
+	if facts := validateDeepSeekModelFacts(payload.ModelFacts); len(facts) > 0 {
+		snap.ModelFacts = facts
+	}
 	if snap.Timezone == "" {
 		snap.Timezone = "Asia/Shanghai"
 	}
@@ -551,6 +588,10 @@ func parseDeepSeekPricingHTML(body []byte, src string) (*DeepSeekOfficialPricing
 	snap.Timezone = tz
 	snap.WeekdaysOnly = weekdaysOnly
 	snap.PeakWindows = windows
+	// 模型细节表：上下文/输出长度与能力标签（与价格同源，同一页解析）。
+	if facts := validateDeepSeekModelFacts(parseDeepSeekModelFacts(cells)); len(facts) > 0 {
+		snap.ModelFacts = facts
+	}
 	return snap, nil
 }
 
@@ -760,6 +801,227 @@ func normalizeDeepSeekFamily(model string) string {
 		return "pro"
 	}
 	return "flash"
+}
+
+// ---------------------------------------------------------------------------
+// 模型细节表：上下文/输出长度与能力标签
+//
+// 官方 API 的 /v1/models 只有 id/object/owned_by（实测），能力事实只能来自文档页
+// 「模型细节」表。这里按行标签精确匹配，取值 1 个表示两个模型族共用（colspan 行），
+// 2 个按 flash/pro 顺序。措辞不明确（如「仅非思考模式支持」）一律视为未声明。
+// ---------------------------------------------------------------------------
+
+var (
+	deepSeekContextLengthLabels = []string{"上下文长度", "CONTEXT LENGTH"}
+	deepSeekMaxOutputLabels     = []string{"输出长度", "MAX OUTPUT"}
+	deepSeekToolCallsLabels     = []string{"Tool Calls", "工具调用"}
+	deepSeekResponsesAPILabels  = []string{"Responses API"}
+	deepSeekAnthropicAPILabels  = []string{"Anthropic API"}
+	deepSeekVisionLabels        = []string{"图像理解", "Vision"}
+)
+
+// deepSeekRowBoundaryLabels 「模型细节」表里其它行的标签：取值收集到此为止。
+// （表内 colspan 单值行只有一个取值单元格，后面紧跟的是下一行标签或分组标题。）
+var deepSeekRowBoundaryLabels = []string{
+	"功能", "FEATURES", "价格", "PRICING", "并发限制", "CONCURRENCY",
+}
+
+// deepSeekRowBoundary 判断单元格是否是「模型细节」表里另一行的标签。
+func deepSeekRowBoundary(cell string) bool {
+	trimmed := strings.TrimSpace(cell)
+	for _, label := range deepSeekRowBoundaryLabels {
+		if strings.EqualFold(trimmed, label) {
+			return true
+		}
+	}
+	return false
+}
+
+// deepSeekQuantityRe 匹配带千分位与小数的数量（如 "1M"、"最大 384K"、"1,000,000"）。
+var deepSeekQuantityRe = regexp.MustCompile(`[0-9][0-9,]*(?:\.[0-9]+)?`)
+
+// deepSeekFactKeyForLabel 返回精确匹配到的能力字段名；非标签行返回空串。
+func deepSeekFactKeyForLabel(cell string) string {
+	candidates := []struct {
+		key    string
+		labels []string
+	}{
+		{"context_length", deepSeekContextLengthLabels},
+		{"max_completion_tokens", deepSeekMaxOutputLabels},
+		{"supports_tools", deepSeekToolCallsLabels},
+		{"supports_responses", deepSeekResponsesAPILabels},
+		{"supports_anthropic", deepSeekAnthropicAPILabels},
+		{"supports_vision", deepSeekVisionLabels},
+	}
+	trimmed := strings.TrimSpace(cell)
+	for _, c := range candidates {
+		for _, label := range c.labels {
+			if strings.EqualFold(trimmed, label) {
+				return c.key
+			}
+		}
+	}
+	return ""
+}
+
+// parseDeepSeekModelFacts 从「模型细节」表解析各模型族的上下文与能力事实。
+func parseDeepSeekModelFacts(cells []string) map[string]DeepSeekModelFacts {
+	facts := map[string]DeepSeekModelFacts{}
+	if len(cells) == 0 {
+		return facts
+	}
+	// 取每个字段第一次出现的行位置（不同页面的行序可能不同）。
+	labelIndex := map[string]int{}
+	for i, cell := range cells {
+		if key := deepSeekFactKeyForLabel(cell); key != "" {
+			if _, seen := labelIndex[key]; !seen {
+				labelIndex[key] = i
+			}
+		}
+	}
+	for key, idx := range labelIndex {
+		values := make([]string, 0, 2)
+		for i := idx + 1; i < len(cells) && len(values) < 2; i++ {
+			if deepSeekFactKeyForLabel(cells[i]) != "" || deepSeekRowBoundary(cells[i]) {
+				break // 下一行标签 / 分组标题，本行取值结束
+			}
+			values = append(values, cells[i])
+		}
+		applyDeepSeekFactValues(facts, key, values)
+	}
+	// 全为空事实时不留残壳。
+	for family, fact := range facts {
+		if fact.isZero() {
+			delete(facts, family)
+		}
+	}
+	return facts
+}
+
+// applyDeepSeekFactValues 把一行取值写入 flash/pro 两个模型族（单值表示两族共用）。
+func applyDeepSeekFactValues(facts map[string]DeepSeekModelFacts, key string, values []string) {
+	write := func(family string, raw string) {
+		fact := facts[family]
+		switch key {
+		case "context_length":
+			if v, ok := parseDeepSeekTokenQuantity(raw); ok {
+				fact.ContextLength = v
+			}
+		case "max_completion_tokens":
+			if v, ok := parseDeepSeekTokenQuantity(raw); ok {
+				fact.MaxCompletionTokens = v
+			}
+		case "supports_vision", "supports_tools", "supports_responses", "supports_anthropic":
+			flag, ok := parseDeepSeekSupportFlag(raw)
+			if !ok {
+				return
+			}
+			switch key {
+			case "supports_vision":
+				fact.SupportsVision = flag
+			case "supports_tools":
+				fact.SupportsTools = flag
+			case "supports_responses":
+				fact.SupportsResponses = flag
+			case "supports_anthropic":
+				fact.SupportsAnthropic = flag
+			}
+		default:
+			return
+		}
+		facts[family] = fact
+	}
+	switch len(values) {
+	case 0:
+		return
+	case 1:
+		write("flash", values[0])
+		write("pro", values[0])
+	default:
+		write("flash", values[0])
+		write("pro", values[1])
+	}
+}
+
+// parseDeepSeekTokenQuantity 解析 "1M" / "最大 384K" / "MAXIMUM: 384K" 形式的数量。
+// K/M/B 按十进制（与官方价格表的“百万 tokens”口径一致，且与上游 TokenRhythm
+// 报告的 1000000 / 384000 相互印证）。
+func parseDeepSeekTokenQuantity(raw string) (int, bool) {
+	s := strings.ToUpper(strings.TrimSpace(raw))
+	if s == "" {
+		return 0, false
+	}
+	num := deepSeekQuantityRe.FindString(s)
+	if num == "" {
+		return 0, false
+	}
+	value, err := strconv.ParseFloat(strings.ReplaceAll(num, ",", ""), 64)
+	if err != nil || value <= 0 {
+		return 0, false
+	}
+	multiplier := 1.0
+	if idx := strings.Index(s, num) + len(num); idx < len(s) {
+		switch s[idx] {
+		case 'K':
+			multiplier = 1e3
+		case 'M':
+			multiplier = 1e6
+		case 'B':
+			multiplier = 1e9
+		}
+	}
+	scaled := value * multiplier
+	if scaled > float64(math.MaxInt32) {
+		return 0, false
+	}
+	return int(scaled), true
+}
+
+// parseDeepSeekSupportFlag 解析能力行取值：仅「支持/✓」与「不支持/Not supported」
+// 这类明确措辞才产生布尔值；其它措辞（如「仅非思考模式支持」）视为未声明。
+func parseDeepSeekSupportFlag(raw string) (*bool, bool) {
+	s := strings.TrimSpace(raw)
+	if s == "" || s == "-" || s == "—" {
+		return nil, false
+	}
+	no := false
+	yes := true
+	for _, v := range []string{"不支持", "✗", "✘", "Not supported", "No"} {
+		if strings.EqualFold(s, v) {
+			return &no, true
+		}
+	}
+	for _, v := range []string{"支持", "✓", "Yes", "Supported"} {
+		if strings.EqualFold(s, v) {
+			return &yes, true
+		}
+	}
+	return nil, false
+}
+
+// validateDeepSeekModelFacts 宽松校验：事实只用于展示透传，取值不合理时丢弃该族事实，
+// 不让它影响价格快照本身。
+func validateDeepSeekModelFacts(facts map[string]DeepSeekModelFacts) map[string]DeepSeekModelFacts {
+	if len(facts) == 0 {
+		return facts
+	}
+	valid := make(map[string]DeepSeekModelFacts, len(facts))
+	for family, fact := range facts {
+		if fact.ContextLength < 0 || fact.MaxCompletionTokens < 0 {
+			continue
+		}
+		if fact.ContextLength > 100_000_000 || fact.MaxCompletionTokens > 100_000_000 {
+			continue
+		}
+		if fact.ContextLength > 0 && fact.MaxCompletionTokens > fact.ContextLength {
+			continue
+		}
+		if fact.isZero() {
+			continue
+		}
+		valid[family] = fact
+	}
+	return valid
 }
 
 // validateDeepSeekOfficialPricing 自检：防止解析错误（页面改版/抓取到异常内容）污染计费。
@@ -972,6 +1234,16 @@ func lookupDeepSeekOfficialRate(model string) (DeepSeekModelRate, DeepSeekOffici
 		return DeepSeekModelRate{}, *snap, false
 	}
 	return rate, *snap, true
+}
+
+// deepSeekOfficialModelFacts 返回官方文档声明的模型能力事实（key: "flash"/"pro"）。
+// 未同步或页面未声明时 ok=false，调用方必须保持既有响应结构、不做推断。
+func deepSeekOfficialModelFacts() (map[string]DeepSeekModelFacts, bool) {
+	snap := deepSeekOfficial.Load()
+	if snap == nil || len(snap.ModelFacts) == 0 {
+		return nil, false
+	}
+	return snap.ModelFacts, true
 }
 
 // deepSeekOfficialPeakWindows 返回同步到的峰谷时段（未同步时 ok=false）。
