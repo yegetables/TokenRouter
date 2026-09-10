@@ -83,7 +83,7 @@ func (s *SettingService) UpdateSettingsWithAuthSourceDefaultsOmitting(ctx contex
 func (s *SettingService) refreshCachedSettingsAfterWrite(ctx context.Context, settings *SystemSettings, omitted OmittedSettingKeys) {
 	// 设置写入可能改了站点展示币种（balance_unit_name）：立即失效 DeepSeek 官方价
 	// 的币种缓存，使计费切换到同口径的官方数字，无需等待 TTL 自然过期。
-	InvalidateDeepSeekPricingCurrencyCache()
+	InvalidateDeepSeekPricingCache()
 	if len(omitted) == 0 {
 		s.refreshCachedSettings(settings)
 		return

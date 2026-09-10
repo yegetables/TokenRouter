@@ -10,18 +10,19 @@ package service
 //   → 自检校验 → 落盘 → 热加载」的方式自动同步，使官方调价或峰谷时段调整
 //   无需修改代码或升级镜像即可生效。
 //
-// 数据源（多币种，两页同时抓取、各自独立更新）
+// 数据源（人民币基准页）
 //   1) 配置 pricing.deepseek_pricing_url（默认官方中文定价页，人民币原生价格）
-//      + pricing.deepseek_pricing_url_usd（默认官方英文定价页，美元原生价格）
 //      · 返回 JSON（若未来官方提供 API）→ 按 deepSeekOfficialJSONPayload 解析，
 //        币种取 payload.currency
 //      · 返回 HTML（当前）→ 按文档页表格解析，币种由价格单元格的货币标记判定
+//      （英文页解析能力保留并有单测覆盖，但默认不作为数据源）
 //   2) 落盘文件 {pricing.data_dir}/deepseek_official_pricing.json（上次成功结果）
 //   3) 内置常量（仅人民币口径，见 billing_service.go）
 //
-// 币种选择：计费时按站点展示币种（settings.balance_unit_name）取同一口径的那一套
-// 数字；缺失该币种快照时不换算、也不借用其它币种的数字，详见
-// deepseek_pricing_currency.go。峰谷倍率与时段是比值与时刻，与币种无关。
+// 站点口径：以人民币价为基准——CNY 站点原样使用；USD 站点按站点配置的
+// usd_exchange_rate 折算（1 USD = N CNY，与同步脚本对其它分组的折算一致）；
+// 其它币种或 USD 站点缺汇率时不覆盖价卡并打告警，详见 deepseek_pricing_currency.go。
+// 峰谷倍率与时段是比值与时刻，与币种无关。
 //
 // 计费热路径仅读取内存 atomic 快照，不产生网络或磁盘 IO。
 // ============================================================================
@@ -52,7 +53,8 @@ import (
 const (
 	// 默认数据源：官方中文定价页（价格以人民币元计价，与国内账号余额口径一致）
 	defaultDeepSeekPricingURL = "https://api-docs.deepseek.com/zh-cn/quick_start/pricing"
-	// 英文页作为解析兜底（美元计价）
+	// 英文页：解析能力保留（解析器与单测覆盖），但默认不作为数据源——
+	// 非 CNY 站点统一按 usd_exchange_rate 折算人民币基准价，避免两套美元数字并存。
 	fallbackDeepSeekPricingURL = "https://api-docs.deepseek.com/quick_start/pricing"
 
 	deepSeekPricingFileName = "deepseek_official_pricing.json"
@@ -345,6 +347,15 @@ func refreshDeepSeekOfficialPricing(cfg *config.Config) {
 		return
 	}
 
+	// 只保留本轮来源产出的币种：历史快照里可能残留已废弃的币种（如英文页美元价）。
+	pruneDeepSeekCurrencies(next, updated)
+	if _, ok := next.ratesFor(deepSeekBaseCurrency); !ok {
+		logger.LegacyPrintf(deepSeekPricingLogScope,
+			"[DeepSeekPricing] 快照缺少人民币基准（%s）价，官方价不生效；"+
+				"请确认 pricing.deepseek_pricing_url 指向官方中文定价页", deepSeekBaseCurrency)
+		return
+	}
+
 	next.FetchedAt = time.Now()
 	deepSeekOfficial.Store(next)
 	if err := saveDeepSeekPricingSnapshot(deepSeekDataPath, next); err != nil {
@@ -396,17 +407,19 @@ func mergeDeepSeekSourceSnapshot(dst, src *DeepSeekOfficialPricing, applySnapsho
 	return currency, nil
 }
 
+// deepSeekPricingSourceURLs 返回官方价数据源。
+//
+// 只抓人民币基准页（默认中文页）：非 CNY 站点按 usd_exchange_rate 折算，
+// 与同步脚本一致。英文页解析能力仍保留（fixture/单测覆盖），默认不作为数据源，
+// 避免同一模型出现"官方美元页原生价"与"人民币价折算"两套不一致的数字。
 func deepSeekPricingSourceURLs(cfg *config.Config) []string {
 	var out []string
 	if cfg != nil {
 		if u := strings.TrimSpace(cfg.Pricing.DeepSeekPricingURL); u != "" {
 			out = append(out, u)
 		}
-		if u := strings.TrimSpace(cfg.Pricing.DeepSeekPricingURLUSD); u != "" {
-			out = append(out, u)
-		}
 	}
-	out = append(out, defaultDeepSeekPricingURL, fallbackDeepSeekPricingURL)
+	out = append(out, defaultDeepSeekPricingURL)
 	return dedupeStrings(out)
 }
 
@@ -1191,6 +1204,18 @@ func deepSeekPricingEqual(a, b *DeepSeekOfficialPricing) bool {
 	return err1 == nil && err2 == nil && string(aj) == string(bj)
 }
 
+// pruneDeepSeekCurrencies 只保留 keep 中的币种，其余（旧快照残留）删除。
+func pruneDeepSeekCurrencies(snap *DeepSeekOfficialPricing, keep map[string]struct{}) {
+	if snap == nil {
+		return
+	}
+	for currency := range snap.Currencies {
+		if _, ok := keep[currency]; !ok {
+			delete(snap.Currencies, currency)
+		}
+	}
+}
+
 func describeDeepSeekRates(snap *DeepSeekOfficialPricing) string {
 	if snap == nil {
 		return ""
@@ -1224,25 +1249,50 @@ func describeDeepSeekCurrencies(snap *DeepSeekOfficialPricing) string {
 // 计费热路径访问器
 // ---------------------------------------------------------------------------
 
-// lookupDeepSeekOfficialRate 返回与站点展示币种口径一致的官方单价快照。
+// lookupDeepSeekOfficialRate 返回与站点展示口径一致的官方单价。
 //
-// 站点币种决定取哪一套官方数字（中文页人民币 / 英文页美元）。没有对应币种的
-// 快照时 ok=false：调用方不得改用其它币种的数字（避免跨币种误用），由
-// applyDeepSeekOfficialPricing 决定是否回退内置常量或保持上游价卡。
+// 基准始终是官方中文页的人民币价：
+//   - 站点 CNY → 原样返回；
+//   - 站点 USD → ÷ usd_exchange_rate（1 USD = N CNY），与同步脚本折算其它分组一致；
+//   - 其它币种或 USD 站点缺汇率 → ok=false。
+//
+// ok=false 时调用方不得改用其它口径的数字（避免跨币种误用），由
+// applyDeepSeekOfficialPricing 决定回退内置常量还是保持上游价卡。
 func lookupDeepSeekOfficialRate(model string) (DeepSeekModelRate, DeepSeekOfficialPricing, bool) {
 	snap := deepSeekOfficial.Load()
 	if snap == nil {
 		return DeepSeekModelRate{}, DeepSeekOfficialPricing{}, false
 	}
-	rates, ok := snap.ratesFor(deepSeekSiteCurrency())
+	base, ok := snap.ratesFor(deepSeekBaseCurrency)
 	if !ok {
 		return DeepSeekModelRate{}, *snap, false
 	}
-	rate, ok := rates.Models[normalizeDeepSeekFamily(model)]
+	rate, ok := base.Models[normalizeDeepSeekFamily(model)]
 	if !ok {
 		return DeepSeekModelRate{}, *snap, false
 	}
-	return rate, *snap, true
+	display := deepSeekSiteDisplay()
+	if !deepSeekDisplayUsable(display) {
+		return DeepSeekModelRate{}, *snap, false
+	}
+	if display.Currency == deepSeekBaseCurrency {
+		return rate, *snap, true
+	}
+	return convertDeepSeekRate(rate, display.USDExchangeRate), *snap, true
+}
+
+// convertDeepSeekRate 把人民币基准单价折算到站点币种（汇率语义 1 USD = N CNY）。
+// 峰谷倍率是比值，直接沿用。
+func convertDeepSeekRate(rate DeepSeekModelRate, usdExchangeRate float64) DeepSeekModelRate {
+	if usdExchangeRate <= 0 {
+		return rate
+	}
+	return DeepSeekModelRate{
+		InputOffPeak:         rate.InputOffPeak / usdExchangeRate,
+		InputCacheHitOffPeak: rate.InputCacheHitOffPeak / usdExchangeRate,
+		OutputOffPeak:        rate.OutputOffPeak / usdExchangeRate,
+		PeakMultiplier:       rate.PeakMultiplier,
+	}
 }
 
 // deepSeekOfficialModelFacts 返回官方文档声明的模型能力事实（key: "flash"/"pro"）。

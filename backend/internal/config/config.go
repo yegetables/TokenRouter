@@ -667,9 +667,6 @@ type PricingConfig struct {
 	// DeepSeek 官方定价与峰谷时段自动同步（官方无价格 API，抓取官方文档定价页）
 	// 数据源 URL，默认官方中文定价页（人民币原生价格）
 	DeepSeekPricingURL string `mapstructure:"deepseek_pricing_url"`
-	// 美元口径数据源 URL，默认官方英文定价页（美元原生价格）。
-	// 快照按币种分别保存，计费时取与站点展示币种一致的那一套，不做汇率换算。
-	DeepSeekPricingURLUSD string `mapstructure:"deepseek_pricing_url_usd"`
 	// 同步间隔（小时），默认 6
 	DeepSeekSyncIntervalHours int `mapstructure:"deepseek_sync_interval_hours"`
 	// 是否启用自动同步；未配置（nil）视为启用
@@ -2327,8 +2324,6 @@ func setDefaults() {
 
 	// DeepSeek 官方定价自动同步（官方未提供价格 API，抓取官方文档定价页）
 	viper.SetDefault("pricing.deepseek_pricing_url", "https://api-docs.deepseek.com/zh-cn/quick_start/pricing")
-	// 美元口径来源：官方英文定价页（价格原生以美元计价）
-	viper.SetDefault("pricing.deepseek_pricing_url_usd", "https://api-docs.deepseek.com/quick_start/pricing")
 	viper.SetDefault("pricing.deepseek_sync_interval_hours", 6)
 	viper.SetDefault("pricing.deepseek_auto_sync", true)
 

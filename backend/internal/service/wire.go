@@ -751,10 +751,13 @@ func ProvideSettingService(settingRepo SettingRepository, paymentConfigService *
 	SetCodexCanonicalUserAgentResolver(func() string {
 		return svc.GetOpenAICodexUserAgent(context.Background())
 	})
-	// DeepSeek 官方价按币种分页面同步（中文页人民币 / 英文页美元），计费时按站点
-	// 展示币种取同口径数字；站点切换币种后自动换用另一套，不做汇率换算。
-	SetDeepSeekPricingCurrencyResolver(func() string {
-		return svc.GetBalanceUnitName(context.Background())
+	// DeepSeek 官方价以人民币为基准：CNY 站点原样用，USD 站点按站点配置的
+	// usd_exchange_rate（1 USD = N CNY）折算，与同步脚本的折算口径一致。
+	SetDeepSeekPricingDisplayResolver(func() DeepSeekPricingDisplaySettings {
+		return DeepSeekPricingDisplaySettings{
+			Currency:        svc.GetBalanceUnitName(context.Background()),
+			USDExchangeRate: svc.GetUSDExchangeRate(context.Background()),
+		}
 	})
 	return svc
 }

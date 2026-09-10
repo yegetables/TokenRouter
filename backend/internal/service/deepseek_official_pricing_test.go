@@ -38,13 +38,24 @@ func loadDeepSeekFixture(t *testing.T, name string) []byte {
 	return body
 }
 
-// useDeepSeekSiteCurrency 固定站点展示币种，并在用例结束后恢复默认（USD）。
+// useDeepSeekSiteDisplay 固定站点展示口径（币种 + 可选汇率），用例结束后恢复默认。
+func useDeepSeekSiteDisplay(t *testing.T, currency string, usdExchangeRate float64) {
+	t.Helper()
+	SetDeepSeekPricingDisplayResolver(func() DeepSeekPricingDisplaySettings {
+		return DeepSeekPricingDisplaySettings{Currency: currency, USDExchangeRate: usdExchangeRate}
+	})
+	t.Cleanup(func() {
+		SetDeepSeekPricingDisplayResolver(func() DeepSeekPricingDisplaySettings {
+			return DeepSeekPricingDisplaySettings{}
+		})
+		InvalidateDeepSeekPricingCache()
+	})
+}
+
+// useDeepSeekSiteCurrency 只固定币种（不配汇率）。
 func useDeepSeekSiteCurrency(t *testing.T, currency string) {
 	t.Helper()
-	SetDeepSeekPricingCurrencyResolver(func() string { return currency })
-	t.Cleanup(func() {
-		SetDeepSeekPricingCurrencyResolver(func() string { return "" })
-	})
+	useDeepSeekSiteDisplay(t, currency, 0)
 }
 
 // parseDeepSeekFixtureSnapshot 解析夹具页并返回快照。
@@ -378,31 +389,56 @@ func TestApplyDeepSeekPricing_UsesSyncedSnapshot(t *testing.T) {
 	require.InDelta(t, 1e-6, weekend.InputPricePerToken, 1e-15)
 }
 
-// 站点币种决定取哪一套官方数字：同一份双币种快照下，USD 站点用美元页、CNY 站点用人民币页。
+// 站点口径决定折算方式：一律以人民币价为准，CNY 原样、USD 按 usd_exchange_rate 折算。
+// （不再使用官方英文页的美元原生价，避免同一模型出现两套美元数字。）
 func TestApplyDeepSeekPricing_SelectsCurrencyBySiteSetting(t *testing.T) {
 	restore := deepSeekOfficial.Load()
 	t.Cleanup(func() { deepSeekOfficial.Store(restore) })
 
-	deepSeekOfficial.Store(dualCurrencySnapshot(t))
+	deepSeekOfficial.Store(parseDeepSeekFixtureSnapshot(t, "deepseek_pricing_zh.html", defaultDeepSeekPricingURL))
 
 	pricing := &ModelPricing{InputPricePerToken: 1, OutputPricePerToken: 1, CacheReadPricePerToken: 1}
 
 	useDeepSeekSiteCurrency(t, "CNY")
 	cny := applyDeepSeekOfficialPricing("deepseek-flash", pricing)
-	require.InDelta(t, 1e-6, cny.InputPricePerToken, 1e-15) // ¥1/M
+	require.InDelta(t, 1e-6, cny.InputPricePerToken, 1e-15) // ¥1/M 原样
 	require.InDelta(t, 4e-6, cny.OutputPricePerToken, 1e-15)
 
-	useDeepSeekSiteCurrency(t, "USD")
+	// USD 站点：¥1/M ÷ 7.2 = $0.1389/M（与同步脚本折算其它分组一致）
+	useDeepSeekSiteDisplay(t, "USD", 7.2)
 	usd := applyDeepSeekOfficialPricing("deepseek-flash", pricing)
-	require.InDelta(t, 1.5e-7, usd.InputPricePerToken, 1e-15) // $0.15/M
-	require.InDelta(t, 6e-7, usd.OutputPricePerToken, 1e-15)
+	require.InDelta(t, 1e-6/7.2, usd.InputPricePerToken, 1e-18)
+	require.InDelta(t, 4e-6/7.2, usd.OutputPricePerToken, 1e-18)
+	require.InDelta(t, 2e-8/7.2, usd.CacheReadPricePerToken, 1e-20)
 
 	usdPro := applyDeepSeekOfficialPricing("deepseek-v4-pro", pricing)
-	require.InDelta(t, 6.6e-7, usdPro.InputPricePerToken, 1e-15) // $0.66/M
+	require.InDelta(t, 4.5e-6/7.2, usdPro.InputPricePerToken, 1e-18)
+
+	// 换汇率立即按新汇率折算
+	useDeepSeekSiteDisplay(t, "USD", 7.5)
+	usd75 := applyDeepSeekOfficialPricing("deepseek-flash", pricing)
+	require.InDelta(t, 1e-6/7.5, usd75.InputPricePerToken, 1e-18)
+
+	// 峰谷倍率是比值，折算后仍为 2
+	require.InDelta(t, 2.0, convertDeepSeekRate(DeepSeekModelRate{InputOffPeak: 1e-6, PeakMultiplier: 2}, 7.2).PeakMultiplier, 1e-12)
 }
 
-// 站点为 USD 但只有人民币快照时：既不换算，也不套用人民币常量，保持上游价卡数字。
-func TestApplyDeepSeekPricing_USDSiteWithoutUSDRatesKeepsUpstreamCard(t *testing.T) {
+// 站点币种为其它值（如自定义单位）时不覆盖价卡，避免把人民币数字标成别的单位。
+func TestApplyDeepSeekPricing_UnsupportedCurrencyKeepsUpstreamCard(t *testing.T) {
+	restore := deepSeekOfficial.Load()
+	t.Cleanup(func() { deepSeekOfficial.Store(restore) })
+	deepSeekOfficial.Store(parseDeepSeekFixtureSnapshot(t, "deepseek_pricing_zh.html", defaultDeepSeekPricingURL))
+
+	pricing := &ModelPricing{InputPricePerToken: 0.5e-6, OutputPricePerToken: 2e-6, CacheReadPricePerToken: 1e-8}
+	useDeepSeekSiteCurrency(t, "CREDIT")
+	got := applyDeepSeekOfficialPricing("deepseek-flash", pricing)
+	require.InDelta(t, 0.5e-6, got.InputPricePerToken, 1e-18)
+	require.InDelta(t, 2e-6, got.OutputPricePerToken, 1e-18)
+}
+
+// USD 站点未配置 usd_exchange_rate 时：不折算、也不套用人民币常量，保持上游价卡数字
+// （换算需要汇率，缺汇率不猜；同时 deepSeekSiteDisplay 会打一条去重告警便于排查）。
+func TestApplyDeepSeekPricing_USDSiteWithoutExchangeRateKeepsUpstreamCard(t *testing.T) {
 	restore := deepSeekOfficial.Load()
 	t.Cleanup(func() { deepSeekOfficial.Store(restore) })
 
@@ -511,21 +547,57 @@ func TestMergeDeepSeekSourceSnapshot_KeepsOtherCurrencyOnFailure(t *testing.T) {
 	require.Error(t, err)
 }
 
-func TestDeepSeekSiteCurrency_ResolverAndCache(t *testing.T) {
-	SetDeepSeekPricingCurrencyResolver(func() string { return "  cny " })
-	t.Cleanup(func() { SetDeepSeekPricingCurrencyResolver(func() string { return "" }) })
+func TestDeepSeekSiteDisplay_ResolverAndCache(t *testing.T) {
+	SetDeepSeekPricingDisplayResolver(func() DeepSeekPricingDisplaySettings {
+		return DeepSeekPricingDisplaySettings{Currency: "  cny ", USDExchangeRate: 7.2}
+	})
+	t.Cleanup(func() {
+		SetDeepSeekPricingDisplayResolver(func() DeepSeekPricingDisplaySettings {
+			return DeepSeekPricingDisplaySettings{}
+		})
+		InvalidateDeepSeekPricingCache()
+	})
 
-	require.Equal(t, "CNY", deepSeekSiteCurrency())
+	display := deepSeekSiteDisplay()
+	require.Equal(t, "CNY", display.Currency)
+	require.InDelta(t, 7.2, display.USDExchangeRate, 1e-12)
+	require.True(t, deepSeekDisplayUsable(display))
 
-	// 缓存命中：切换 resolver 但不失效缓存时仍返回旧值，失效后立即收敛
-	deepSeekCurrencyResolver.Store(func() string { return "usd" })
-	require.Equal(t, "CNY", deepSeekSiteCurrency())
-	InvalidateDeepSeekPricingCurrencyCache()
+	// 缓存命中：换 resolver 但不失效缓存时仍返回旧口径，失效后立即收敛
+	deepSeekDisplayResolver.Store(func() DeepSeekPricingDisplaySettings {
+		return DeepSeekPricingDisplaySettings{Currency: "usd", USDExchangeRate: 7.0}
+	})
+	require.Equal(t, "CNY", deepSeekSiteDisplay().Currency)
+	InvalidateDeepSeekPricingCache()
+	require.Equal(t, "USD", deepSeekSiteDisplay().Currency)
+
+	// USD 且无汇率 → 口径不可用（退回价卡）
+	SetDeepSeekPricingDisplayResolver(func() DeepSeekPricingDisplaySettings {
+		return DeepSeekPricingDisplaySettings{Currency: "USD"}
+	})
+	require.False(t, deepSeekDisplayUsable(deepSeekSiteDisplay()))
+
+	// 读取器返回空币种 → 回退默认 USD（同样因缺汇率不可用）
+	SetDeepSeekPricingDisplayResolver(func() DeepSeekPricingDisplaySettings {
+		return DeepSeekPricingDisplaySettings{}
+	})
 	require.Equal(t, "USD", deepSeekSiteCurrency())
+	require.False(t, deepSeekDisplayUsable(deepSeekSiteDisplay()))
 
-	// 读取器返回空 → 回退默认 USD
-	SetDeepSeekPricingCurrencyResolver(func() string { return "" })
-	require.Equal(t, "USD", deepSeekSiteCurrency())
+	// 其它币种不可用
+	require.False(t, deepSeekDisplayUsable(DeepSeekPricingDisplaySettings{Currency: "CREDIT", USDExchangeRate: 7.2}))
+	require.True(t, deepSeekDisplayUsable(DeepSeekPricingDisplaySettings{Currency: "CNY"}))
+}
+
+// 旧快照残留的币种会被清理，只保留本轮来源产出的币种。
+func TestPruneDeepSeekCurrencies(t *testing.T) {
+	snap := dualCurrencySnapshot(t)
+	require.Equal(t, []string{"CNY", "USD"}, deepSeekSortedCurrencies(snap))
+
+	pruneDeepSeekCurrencies(snap, map[string]struct{}{"CNY": {}})
+	require.Equal(t, []string{"CNY"}, deepSeekSortedCurrencies(snap))
+	_, ok := snap.ratesFor("USD")
+	require.False(t, ok)
 }
 
 func TestNormalizeDeepSeekFamily(t *testing.T) {

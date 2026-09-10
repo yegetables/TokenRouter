@@ -481,6 +481,20 @@ func (s *SettingService) getStringOrDefault(settings map[string]string, key, def
 	return defaultValue
 }
 
+// GetUSDExchangeRate 获取站点配置的美元兑人民币汇率（1 USD = N CNY）。
+// 未配置、非数字或非正数时返回 0，表示该口径不可用（调用方据此降级，不猜测汇率）。
+func (s *SettingService) GetUSDExchangeRate(ctx context.Context) float64 {
+	raw, err := s.settingRepo.GetValue(ctx, SettingKeyUSDExchangeRate)
+	if err != nil {
+		return 0
+	}
+	rate, err := strconv.ParseFloat(strings.TrimSpace(raw), 64)
+	if err != nil || rate <= 0 {
+		return 0
+	}
+	return rate
+}
+
 // GetBalanceUnitName 获取内部余额展示单位名称
 func (s *SettingService) GetBalanceUnitName(ctx context.Context) string {
 	value, err := s.settingRepo.GetValue(ctx, SettingKeyBalanceUnitName)
