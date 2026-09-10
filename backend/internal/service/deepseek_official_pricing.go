@@ -1,0 +1,767 @@
+package service
+
+// ============================================================================
+// DeepSeek 官方定价与峰谷时段自动同步
+//
+// 背景
+//   DeepSeek 官方未提供价格查询 API（已验证：/v1/models 仅返回模型名、
+//   /user/balance 仅返回余额、其余价格类端点均 404）。价格与峰谷时段的
+//   唯一权威来源是官方文档定价页，因此这里采用「抓取官方文档页 → 结构化解析
+//   → 自检校验 → 落盘 → 热加载」的方式自动同步，使官方调价或峰谷时段调整
+//   无需修改代码或升级镜像即可生效。
+//
+// 数据源优先级
+//   1) 配置 pricing.deepseek_pricing_url（默认官方中文定价页，人民币原生价格）
+//      · 返回 JSON（若未来官方提供 API）→ 按 deepSeekOfficialJSONPayload 解析
+//      · 返回 HTML（当前）→ 按文档页表格解析（中英文页均支持）
+//   2) 落盘文件 {pricing.data_dir}/deepseek_official_pricing.json（上次成功结果）
+//   3) 内置常量（最终兜底，见 billing_service.go）
+//
+// 计费热路径仅读取内存 atomic 快照，不产生网络或磁盘 IO。
+// ============================================================================
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"io"
+	"net/http"
+	"net/url"
+	"os"
+	"path/filepath"
+	"regexp"
+	"strconv"
+	"strings"
+	"sync"
+	"sync/atomic"
+	"time"
+
+	"github.com/TokenFlux/TokenRouter/internal/config"
+	"github.com/TokenFlux/TokenRouter/internal/pkg/logger"
+	"github.com/TokenFlux/TokenRouter/internal/util/urlvalidator"
+)
+
+const (
+	// 默认数据源：官方中文定价页（价格以人民币元计价，与国内账号余额口径一致）
+	defaultDeepSeekPricingURL = "https://api-docs.deepseek.com/zh-cn/quick_start/pricing"
+	// 英文页作为解析兜底（美元计价）
+	fallbackDeepSeekPricingURL = "https://api-docs.deepseek.com/quick_start/pricing"
+
+	deepSeekPricingFileName = "deepseek_official_pricing.json"
+	deepSeekPricingLogScope = "service.deepseek_pricing"
+
+	defaultDeepSeekSyncIntervalHours = 6
+	deepSeekPricingHTTPTimeout       = 25 * time.Second
+)
+
+// DeepSeekPeakWindow 单个高峰时段（使用 DeepSeekOfficialPricing.Timezone 指定时区）
+type DeepSeekPeakWindow struct {
+	Start string `json:"start"` // "09:00"
+	End   string `json:"end"`   // "12:00"
+}
+
+// DeepSeekModelRate 单模型官方空闲时段单价（单位：货币/token）与高峰倍率
+type DeepSeekModelRate struct {
+	InputOffPeak         float64 `json:"input_off_peak"`             // 输入（缓存未命中）
+	InputCacheHitOffPeak float64 `json:"input_cache_hit_off_peak"`   // 输入（缓存命中）
+	OutputOffPeak        float64 `json:"output_off_peak"`            // 输出
+	PeakMultiplier       float64 `json:"peak_multiplier"`            // 高峰倍率（官方为 2）
+}
+
+// DeepSeekOfficialPricing 官方定价与峰谷快照
+type DeepSeekOfficialPricing struct {
+	FetchedAt    time.Time                      `json:"fetched_at"`
+	SourceURL    string                         `json:"source_url"`
+	Currency     string                         `json:"currency"`      // "CNY" / "USD"
+	Timezone     string                         `json:"timezone"`      // 峰谷时段所属时区
+	WeekdaysOnly bool                           `json:"weekdays_only"` // 高峰仅工作日
+	PeakWindows  []DeepSeekPeakWindow           `json:"peak_windows"`
+	Models       map[string]DeepSeekModelRate   `json:"models"` // key: "flash" / "pro"
+}
+
+// deepSeekOfficialJSONPayload 未来若官方提供 JSON API 时的期望结构
+type deepSeekOfficialJSONPayload struct {
+	Currency     string          `json:"currency"`
+	Timezone     string          `json:"timezone"`
+	WeekdaysOnly *bool           `json:"weekdays_only"`
+	PeakWindows  []DeepSeekPeakWindow `json:"peak_windows"`
+	Models       map[string]struct {
+		InputOffPeak         float64 `json:"input_off_peak"`
+		InputCacheHitOffPeak float64 `json:"input_cache_hit_off_peak"`
+		OutputOffPeak        float64 `json:"output_off_peak"`
+		PeakMultiplier       float64 `json:"peak_multiplier"`
+	} `json:"models"`
+}
+
+var (
+	deepSeekOfficial atomic.Pointer[DeepSeekOfficialPricing]
+	deepSeekSyncOnce sync.Once
+	deepSeekDataPath string
+)
+
+// StartDeepSeekOfficialPricingSync 载入磁盘快照并启动周期同步（幂等）。
+// 仅在配置了 pricing.data_dir 时启用：生产环境该值始终存在（默认 ./data），
+// 而单元测试构造的空配置不会触发后台网络抓取。
+func StartDeepSeekOfficialPricingSync(cfg *config.Config) {
+	if cfg == nil || strings.TrimSpace(cfg.Pricing.DataDir) == "" {
+		return
+	}
+	deepSeekSyncOnce.Do(func() {
+		dataDir := strings.TrimSpace(cfg.Pricing.DataDir)
+		deepSeekDataPath = filepath.Join(dataDir, deepSeekPricingFileName)
+
+		if snap := loadDeepSeekPricingSnapshot(deepSeekDataPath); snap != nil {
+			deepSeekOfficial.Store(snap)
+			logger.LegacyPrintf(deepSeekPricingLogScope,
+				"[DeepSeekPricing] loaded snapshot: currency=%s fetched_at=%s models=%d",
+				snap.Currency, snap.FetchedAt.Format(time.RFC3339), len(snap.Models))
+		}
+
+		if cfg != nil && !deepSeekAutoSyncEnabled(cfg) {
+			logger.LegacyPrintf(deepSeekPricingLogScope, "[DeepSeekPricing] auto sync disabled")
+			return
+		}
+
+		interval := defaultDeepSeekSyncIntervalHours
+		if cfg != nil && cfg.Pricing.DeepSeekSyncIntervalHours > 0 {
+			interval = cfg.Pricing.DeepSeekSyncIntervalHours
+		}
+
+		go deepSeekPricingSyncLoop(cfg, time.Duration(interval)*time.Hour)
+	})
+}
+
+func deepSeekAutoSyncEnabled(cfg *config.Config) bool {
+	if cfg == nil {
+		return true
+	}
+	return deepSeekAutoSyncSetting(cfg)
+}
+
+// deepSeekAutoSyncSetting 返回显式配置值；未配置时视为启用。
+func deepSeekAutoSyncSetting(cfg *config.Config) bool {
+	if cfg == nil || cfg.Pricing.DeepSeekAutoSync == nil {
+		return true
+	}
+	return *cfg.Pricing.DeepSeekAutoSync
+}
+
+// deepSeekPricingSyncLoop 周期性刷新官方定价；失败时保留上一份快照。
+func deepSeekPricingSyncLoop(cfg *config.Config, interval time.Duration) {
+	// 启动后稍作延迟再拉取，避免与其它启动任务抢占网络
+	time.Sleep(30 * time.Second)
+	refreshDeepSeekOfficialPricing(cfg)
+
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for range ticker.C {
+		refreshDeepSeekOfficialPricing(cfg)
+	}
+}
+
+// refreshDeepSeekOfficialPricing 抓取并解析官方定价页，成功后原子替换快照并落盘。
+func refreshDeepSeekOfficialPricing(cfg *config.Config) {
+	urls := deepSeekPricingSourceURLs(cfg)
+	var lastErr error
+	for _, src := range urls {
+		snap, err := fetchDeepSeekOfficialPricing(cfg, src)
+		if err != nil {
+			lastErr = err
+			logger.LegacyPrintf(deepSeekPricingLogScope,
+				"[DeepSeekPricing] fetch failed: url=%s err=%v", src, err)
+			continue
+		}
+		if err := validateDeepSeekOfficialPricing(snap); err != nil {
+			lastErr = err
+			logger.LegacyPrintf(deepSeekPricingLogScope,
+				"[DeepSeekPricing] validation failed: url=%s err=%v", src, err)
+			continue
+		}
+		prev := deepSeekOfficial.Load()
+		deepSeekOfficial.Store(snap)
+		if err := saveDeepSeekPricingSnapshot(deepSeekDataPath, snap); err != nil {
+			logger.LegacyPrintf(deepSeekPricingLogScope,
+				"[DeepSeekPricing] persist failed: %v", err)
+		}
+		if prev == nil || !deepSeekPricingEqual(prev, snap) {
+			logger.LegacyPrintf(deepSeekPricingLogScope,
+				"[DeepSeekPricing] updated: currency=%s peak=%v models=%s",
+				snap.Currency, snap.PeakWindows, describeDeepSeekRates(snap))
+		}
+		return
+	}
+	if lastErr != nil {
+		logger.LegacyPrintf(deepSeekPricingLogScope,
+			"[DeepSeekPricing] all sources failed, keeping previous snapshot: %v", lastErr)
+	}
+}
+
+func deepSeekPricingSourceURLs(cfg *config.Config) []string {
+	var out []string
+	if cfg != nil {
+		if u := strings.TrimSpace(cfg.Pricing.DeepSeekPricingURL); u != "" {
+			out = append(out, u)
+		}
+	}
+	out = append(out, defaultDeepSeekPricingURL, fallbackDeepSeekPricingURL)
+	return dedupeStrings(out)
+}
+
+// fetchDeepSeekOfficialPricing 拉取单个数据源并解析（自动识别 JSON / HTML）。
+// 数据源 URL 需通过安全白名单校验（security.url_allowlist.pricing_hosts）。
+func fetchDeepSeekOfficialPricing(cfg *config.Config, src string) (*DeepSeekOfficialPricing, error) {
+	target, err := validateDeepSeekPricingSourceURL(cfg, src)
+	if err != nil {
+		return nil, err
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), deepSeekPricingHTTPTimeout)
+	defer cancel()
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, target, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("User-Agent", "TokenRouter/DeepSeekPricingSync")
+	req.Header.Set("Accept", "text/html,application/json;q=0.9,*/*;q=0.8")
+
+	client := deepSeekPricingHTTPClient(cfg)
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("unexpected status %d", resp.StatusCode)
+	}
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 4<<20))
+	if err != nil {
+		return nil, err
+	}
+
+	trimmed := strings.TrimSpace(string(body))
+	if strings.HasPrefix(trimmed, "{") ||
+		strings.Contains(strings.ToLower(resp.Header.Get("Content-Type")), "application/json") {
+		return parseDeepSeekPricingJSON([]byte(trimmed), src)
+	}
+	return parseDeepSeekPricingHTML(body, src)
+}
+
+// deepSeekPricingHTTPClient 构造抓取客户端（支持通过 update.proxy_url 走代理）。
+func deepSeekPricingHTTPClient(cfg *config.Config) *http.Client {
+	client := &http.Client{Timeout: deepSeekPricingHTTPTimeout}
+	if cfg == nil {
+		return client
+	}
+	proxyURL := strings.TrimSpace(cfg.Update.ProxyURL)
+	if proxyURL == "" {
+		return client
+	}
+	parsed, err := url.Parse(proxyURL)
+	if err != nil {
+		return client
+	}
+	client.Transport = &http.Transport{Proxy: http.ProxyURL(parsed)}
+	return client
+}
+
+// validateDeepSeekPricingSourceURL 按安全白名单校验数据源 URL。
+// 未启用白名单时仅做格式校验；启用时必须命中 security.url_allowlist.pricing_hosts。
+func validateDeepSeekPricingSourceURL(cfg *config.Config, raw string) (string, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return "", fmt.Errorf("empty pricing source url")
+	}
+	if cfg == nil || !cfg.Security.URLAllowlist.Enabled {
+		normalized, err := urlvalidator.ValidateURLFormat(raw, true)
+		if err != nil {
+			return "", fmt.Errorf("invalid deepseek pricing url: %w", err)
+		}
+		return normalized, nil
+	}
+	normalized, err := urlvalidator.ValidateHTTPSURL(raw, urlvalidator.ValidationOptions{
+		AllowedHosts:     cfg.Security.URLAllowlist.PricingHosts,
+		RequireAllowlist: true,
+		AllowPrivate:     cfg.Security.URLAllowlist.AllowPrivateHosts,
+	})
+	if err != nil {
+		return "", fmt.Errorf("deepseek pricing url not allowed: %w", err)
+	}
+	return normalized, nil
+}
+
+// parseDeepSeekPricingJSON 解析未来的 JSON API 响应。
+func parseDeepSeekPricingJSON(body []byte, src string) (*DeepSeekOfficialPricing, error) {
+	var payload deepSeekOfficialJSONPayload
+	if err := json.Unmarshal(body, &payload); err != nil {
+		return nil, fmt.Errorf("json decode: %w", err)
+	}
+	snap := &DeepSeekOfficialPricing{
+		FetchedAt:    time.Now(),
+		SourceURL:    src,
+		Currency:     strings.ToUpper(strings.TrimSpace(payload.Currency)),
+		Timezone:     strings.TrimSpace(payload.Timezone),
+		WeekdaysOnly: payload.WeekdaysOnly == nil || *payload.WeekdaysOnly,
+		PeakWindows:  payload.PeakWindows,
+		Models:       map[string]DeepSeekModelRate{},
+	}
+	if snap.Currency == "" {
+		snap.Currency = "CNY"
+	}
+	if snap.Timezone == "" {
+		snap.Timezone = "Asia/Shanghai"
+	}
+	for name, m := range payload.Models {
+		snap.Models[normalizeDeepSeekFamily(name)] = DeepSeekModelRate{
+			InputOffPeak:         m.InputOffPeak,
+			InputCacheHitOffPeak: m.InputCacheHitOffPeak,
+			OutputOffPeak:        m.OutputOffPeak,
+			PeakMultiplier:       m.PeakMultiplier,
+		}
+	}
+	return snap, nil
+}
+
+var (
+	deepSeekTDCellRe = regexp.MustCompile(`(?is)<td[^>]*>(.*?)</td>`)
+	deepSeekTagRe    = regexp.MustCompile(`(?s)<[^>]+>`)
+	deepSeekNumberRe = regexp.MustCompile(`([0-9]+(?:\.[0-9]+)?)`)
+	deepSeekWindowRe = regexp.MustCompile(`([0-9]{1,2}:[0-9]{2})\s*(?:-|–|—|~|至)\s*([0-9]{1,2}:[0-9]{2})`)
+)
+
+// parseDeepSeekPricingHTML 解析官方文档定价页（中文/英文页均支持）。
+//
+// 表格结构（td 单元格序列）：
+//
+//	1M INPUT TOKENS (CACHE HIT) | OFF-PEAK | v_flash v_pro | PEAK | v_flash v_pro
+//	1M INPUT TOKENS (CACHE MISS)| OFF-PEAK | v_flash v_pro | PEAK | v_flash v_pro
+//	1M OUTPUT TOKENS            | OFF-PEAK | v_flash v_pro | PEAK | v_flash v_pro
+//
+// 中文页对应：百万tokens输入（缓存命中/未命中）/ 百万tokens输出 + 空闲时段/高峰时段。
+func parseDeepSeekPricingHTML(body []byte, src string) (*DeepSeekOfficialPricing, error) {
+	raw := string(body)
+	cells := make([]string, 0, 128)
+	for _, m := range deepSeekTDCellRe.FindAllStringSubmatch(raw, -1) {
+		cells = append(cells, cleanDeepSeekCell(m[1]))
+	}
+	if len(cells) == 0 {
+		return nil, fmt.Errorf("no table cells found")
+	}
+
+	hitRow, err := deepSeekFindPriceRow(cells, deepSeekCacheHitLabels)
+	if err != nil {
+		return nil, fmt.Errorf("cache hit row: %w", err)
+	}
+	missRow, err := deepSeekFindPriceRow(cells, deepSeekCacheMissLabels)
+	if err != nil {
+		return nil, fmt.Errorf("cache miss row: %w", err)
+	}
+	outRow, err := deepSeekFindPriceRow(cells, deepSeekOutputLabels)
+	if err != nil {
+		return nil, fmt.Errorf("output row: %w", err)
+	}
+
+	currency := detectDeepSeekCurrency(cells)
+	snap := &DeepSeekOfficialPricing{
+		FetchedAt: time.Now(),
+		SourceURL: src,
+		Currency:  currency,
+		Models: map[string]DeepSeekModelRate{
+			"flash": {
+				InputCacheHitOffPeak: perMillionToPerToken(hitRow.offPeak[0]),
+				InputOffPeak:         perMillionToPerToken(missRow.offPeak[0]),
+				OutputOffPeak:        perMillionToPerToken(outRow.offPeak[0]),
+				PeakMultiplier:       ratioOr(hitRow.peak[0], hitRow.offPeak[0], 2),
+			},
+			"pro": {
+				InputCacheHitOffPeak: perMillionToPerToken(hitRow.offPeak[1]),
+				InputOffPeak:         perMillionToPerToken(missRow.offPeak[1]),
+				OutputOffPeak:        perMillionToPerToken(outRow.offPeak[1]),
+				PeakMultiplier:       ratioOr(hitRow.peak[1], hitRow.offPeak[1], 2),
+			},
+		},
+	}
+
+	tz, weekdaysOnly, windows := parseDeepSeekPeakWindows(raw)
+	snap.Timezone = tz
+	snap.WeekdaysOnly = weekdaysOnly
+	snap.PeakWindows = windows
+	return snap, nil
+}
+
+var (
+	deepSeekCacheHitLabels  = []string{"缓存命中", "CACHE HIT"}
+	deepSeekCacheMissLabels = []string{"缓存未命中", "CACHE MISS"}
+	deepSeekOutputLabels    = []string{"tokens输出", "OUTPUT TOKENS"}
+	deepSeekOffPeakLabels   = []string{"空闲时段", "OFF-PEAK", "OFF PEAK"}
+	deepSeekPeakLabels      = []string{"高峰时段", "PEAK"}
+)
+
+type deepSeekPriceRow struct {
+	offPeak [2]float64
+	peak    [2]float64
+}
+
+func (r deepSeekPriceRow) valid() bool {
+	return r.offPeak[0] > 0 && r.offPeak[1] > 0 && r.peak[0] > 0 && r.peak[1] > 0
+}
+
+// deepSeekFindPriceRow 定位价格行，并读取「空闲时段/高峰时段」各两列数值。
+func deepSeekFindPriceRow(cells []string, labels []string) (deepSeekPriceRow, error) {
+	var row deepSeekPriceRow
+	start := -1
+	for i, c := range cells {
+		if containsAnyFold(c, labels) {
+			start = i
+			break
+		}
+	}
+	if start < 0 {
+		return row, fmt.Errorf("row label not found")
+	}
+	mode := ""
+	for i := start + 1; i < len(cells) && i < start+12; i++ {
+		c := cells[i]
+		if containsAnyFold(c, deepSeekOffPeakLabels) {
+			mode = "off"
+			continue
+		}
+		if containsAnyFold(c, deepSeekPeakLabels) {
+			mode = "peak"
+			continue
+		}
+		if containsAnyFold(c, deepSeekCacheHitLabels) || containsAnyFold(c, deepSeekCacheMissLabels) ||
+			containsAnyFold(c, deepSeekOutputLabels) || strings.Contains(c, "并发") || strings.Contains(c, "CONCURRENCY") {
+			break
+		}
+		if mode == "" {
+			continue
+		}
+		value, ok := parseDeepSeekMoney(c)
+		if !ok {
+			continue
+		}
+		if mode == "off" {
+			if row.offPeak[0] == 0 {
+				row.offPeak[0] = value
+			} else if row.offPeak[1] == 0 {
+				row.offPeak[1] = value
+			}
+		} else {
+			if row.peak[0] == 0 {
+				row.peak[0] = value
+			} else if row.peak[1] == 0 {
+				row.peak[1] = value
+			}
+		}
+	}
+	if !row.valid() {
+		return row, fmt.Errorf("incomplete prices: off=%v peak=%v", row.offPeak, row.peak)
+	}
+	return row, nil
+}
+
+// parseDeepSeekPeakWindows 解析峰谷时段说明（含时区与是否仅工作日）。
+func parseDeepSeekPeakWindows(raw string) (string, bool, []DeepSeekPeakWindow) {
+	text := deepSeekTagRe.ReplaceAllString(raw, " ")
+	text = strings.Join(strings.Fields(text), " ")
+
+	timezone := "Asia/Shanghai"
+	weekdaysOnly := true
+	idx := -1
+	for _, marker := range []string{"高峰时段为", "Peak hours are"} {
+		if i := strings.Index(text, marker); i >= 0 {
+			idx = i
+			break
+		}
+	}
+	if idx < 0 {
+		return timezone, weekdaysOnly, nil
+	}
+	segment := text[idx:]
+	if cut := strings.IndexAny(segment, "。（(；;"); cut > 0 {
+		segment = segment[:cut]
+	}
+	if strings.Contains(segment, "UTC") {
+		timezone = "UTC"
+	}
+	if strings.Contains(segment, "周一至周五") || strings.Contains(strings.ToLower(segment), "monday through friday") ||
+		strings.Contains(strings.ToLower(segment), "weekday") {
+		weekdaysOnly = true
+	}
+	windows := make([]DeepSeekPeakWindow, 0, 2)
+	for _, m := range deepSeekWindowRe.FindAllStringSubmatch(segment, -1) {
+		windows = append(windows, DeepSeekPeakWindow{
+			Start: normalizeClock(m[1]),
+			End:   normalizeClock(m[2]),
+		})
+		if len(windows) == 2 {
+			break
+		}
+	}
+	return timezone, weekdaysOnly, windows
+}
+
+func normalizeClock(v string) string {
+	parts := strings.SplitN(v, ":", 2)
+	if len(parts) != 2 {
+		return v
+	}
+	hour, err := strconv.Atoi(parts[0])
+	if err != nil {
+		return v
+	}
+	return fmt.Sprintf("%02d:%s", hour, parts[1])
+}
+
+func cleanDeepSeekCell(raw string) string {
+	// <sup>(1)</sup> 等脚注标记换成空格，避免污染数值与标签匹配
+	s := strings.ReplaceAll(raw, "</sup>", " ")
+	s = deepSeekTagRe.ReplaceAllString(s, " ")
+	s = strings.ReplaceAll(s, "&nbsp;", " ")
+	s = strings.ReplaceAll(s, "&yen;", "¥")
+	s = strings.ReplaceAll(s, "&#165;", "¥")
+	s = strings.ReplaceAll(s, "&amp;", "&")
+	return strings.Join(strings.Fields(s), " ")
+}
+
+// detectDeepSeekCurrency 仅识别价格单元格的货币标记（前缀 ¥/￥/$ 或后缀「元」），
+// 避免页面其它文案（语言切换、脚注等）造成误判。
+func detectDeepSeekCurrency(cells []string) string {
+	for _, c := range cells {
+		s := strings.TrimSpace(c)
+		if s == "" {
+			continue
+		}
+		if strings.HasPrefix(s, "¥") || strings.HasPrefix(s, "￥") || strings.HasSuffix(s, "元") {
+			return "CNY"
+		}
+		if strings.HasPrefix(s, "$") || strings.HasPrefix(s, "US$") {
+			return "USD"
+		}
+	}
+	return "CNY"
+}
+
+// parseDeepSeekMoney 解析 "1元" / "￥1.5" / "$0.15" 形式的金额。
+func parseDeepSeekMoney(cell string) (float64, bool) {
+	s := strings.TrimSpace(cell)
+	if s == "" {
+		return 0, false
+	}
+	if strings.Contains(s, "元") || strings.Contains(s, "¥") || strings.Contains(s, "￥") || strings.Contains(s, "$") {
+		m := deepSeekNumberRe.FindStringSubmatch(strings.ReplaceAll(s, ",", ""))
+		if len(m) < 2 {
+			return 0, false
+		}
+		v, err := strconv.ParseFloat(m[1], 64)
+		if err != nil {
+			return 0, false
+		}
+		return v, true
+	}
+	return 0, false
+}
+
+func perMillionToPerToken(v float64) float64 {
+	return v / 1e6
+}
+
+func ratioOr(peak, offPeak, fallback float64) float64 {
+	if offPeak <= 0 || peak <= 0 {
+		return fallback
+	}
+	ratio := peak / offPeak
+	if ratio < 1.5 || ratio > 4 {
+		return fallback
+	}
+	return ratio
+}
+
+func containsAnyFold(value string, needles []string) bool {
+	upper := strings.ToUpper(value)
+	for _, n := range needles {
+		if strings.Contains(upper, strings.ToUpper(n)) {
+			return true
+		}
+	}
+	return false
+}
+
+// normalizeDeepSeekFamily 归一模型族：deepseek-v4-pro/…-pro-0813 → pro，其余 → flash。
+func normalizeDeepSeekFamily(model string) string {
+	lower := strings.ToLower(strings.TrimSpace(model))
+	if strings.Contains(lower, "pro") {
+		return "pro"
+	}
+	return "flash"
+}
+
+// validateDeepSeekOfficialPricing 自检：防止解析错误（页面改版/抓取到异常内容）污染计费。
+func validateDeepSeekOfficialPricing(snap *DeepSeekOfficialPricing) error {
+	if snap == nil {
+		return fmt.Errorf("nil snapshot")
+	}
+	if len(snap.Models) == 0 {
+		return fmt.Errorf("no models parsed")
+	}
+	for _, family := range []string{"flash", "pro"} {
+		rate, ok := snap.Models[family]
+		if !ok {
+			return fmt.Errorf("missing model family %q", family)
+		}
+		if rate.InputOffPeak <= 0 || rate.OutputOffPeak <= 0 {
+			return fmt.Errorf("family %q: non-positive price", family)
+		}
+		// 合理性区间：单价 (货币/M) 应在 0.001 ~ 1000 之间
+		if perTokenToMillion(rate.InputOffPeak) < 0.001 || perTokenToMillion(rate.InputOffPeak) > 1000 ||
+			perTokenToMillion(rate.OutputOffPeak) < 0.001 || perTokenToMillion(rate.OutputOffPeak) > 1000 {
+			return fmt.Errorf("family %q: price out of sane range", family)
+		}
+		if rate.InputCacheHitOffPeak > rate.InputOffPeak {
+			return fmt.Errorf("family %q: cache-hit price exceeds cache-miss price", family)
+		}
+		if rate.PeakMultiplier < 1 || rate.PeakMultiplier > 8 {
+			return fmt.Errorf("family %q: implausible peak multiplier %v", family, rate.PeakMultiplier)
+		}
+	}
+	if len(snap.PeakWindows) == 0 {
+		return fmt.Errorf("no peak windows parsed")
+	}
+	for _, w := range snap.PeakWindows {
+		if _, _, err := parseClockRange(w.Start, w.End); err != nil {
+			return fmt.Errorf("invalid peak window %s-%s: %w", w.Start, w.End, err)
+		}
+	}
+	if strings.TrimSpace(snap.Timezone) == "" {
+		return fmt.Errorf("empty timezone")
+	}
+	if strings.TrimSpace(snap.Currency) == "" {
+		return fmt.Errorf("empty currency")
+	}
+	return nil
+}
+
+func perTokenToMillion(v float64) float64 { return v * 1e6 }
+
+func parseClockRange(start, end string) (int, int, error) {
+	parse := func(v string) (int, error) {
+		parts := strings.SplitN(v, ":", 2)
+		if len(parts) != 2 {
+			return 0, fmt.Errorf("bad clock %q", v)
+		}
+		h, err := strconv.Atoi(parts[0])
+		if err != nil {
+			return 0, err
+		}
+		m, err := strconv.Atoi(parts[1])
+		if err != nil {
+			return 0, err
+		}
+		if h < 0 || h > 24 || m < 0 || m > 59 {
+			return 0, fmt.Errorf("out of range clock %q", v)
+		}
+		return h*60 + m, nil
+	}
+	s, err := parse(start)
+	if err != nil {
+		return 0, 0, err
+	}
+	e, err := parse(end)
+	if err != nil {
+		return 0, 0, err
+	}
+	if e <= s {
+		return 0, 0, fmt.Errorf("end not after start")
+	}
+	return s, e, nil
+}
+
+// ---------------------------------------------------------------------------
+// 落盘 / 载入
+// ---------------------------------------------------------------------------
+
+func loadDeepSeekPricingSnapshot(path string) *DeepSeekOfficialPricing {
+	if strings.TrimSpace(path) == "" {
+		return nil
+	}
+	body, err := os.ReadFile(path)
+	if err != nil {
+		return nil
+	}
+	var snap DeepSeekOfficialPricing
+	if err := json.Unmarshal(body, &snap); err != nil {
+		logger.LegacyPrintf(deepSeekPricingLogScope,
+			"[DeepSeekPricing] snapshot decode failed: %v", err)
+		return nil
+	}
+	if validateDeepSeekOfficialPricing(&snap) != nil {
+		return nil
+	}
+	return &snap
+}
+
+func saveDeepSeekPricingSnapshot(path string, snap *DeepSeekOfficialPricing) error {
+	if strings.TrimSpace(path) == "" || snap == nil {
+		return nil
+	}
+	if dir := filepath.Dir(path); dir != "" {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			return err
+		}
+	}
+	body, err := json.MarshalIndent(snap, "", "  ")
+	if err != nil {
+		return err
+	}
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, body, 0o644); err != nil {
+		return err
+	}
+	return os.Rename(tmp, path)
+}
+
+func deepSeekPricingEqual(a, b *DeepSeekOfficialPricing) bool {
+	if a == nil || b == nil {
+		return a == b
+	}
+	aj, err1 := json.Marshal(a)
+	bj, err2 := json.Marshal(b)
+	return err1 == nil && err2 == nil && string(aj) == string(bj)
+}
+
+func describeDeepSeekRates(snap *DeepSeekOfficialPricing) string {
+	parts := make([]string, 0, len(snap.Models))
+	for family, rate := range snap.Models {
+		parts = append(parts, fmt.Sprintf("%s=%.4f/%.4f/%.4f %s/M",
+			family, perTokenToMillion(rate.InputOffPeak), perTokenToMillion(rate.InputCacheHitOffPeak),
+			perTokenToMillion(rate.OutputOffPeak), snap.Currency))
+	}
+	return strings.Join(parts, " ")
+}
+
+// ---------------------------------------------------------------------------
+// 计费热路径访问器
+// ---------------------------------------------------------------------------
+
+// lookupDeepSeekOfficialRate 返回官方同步的单价快照（未同步时 ok=false，调用方回退常量）。
+func lookupDeepSeekOfficialRate(model string) (DeepSeekModelRate, DeepSeekOfficialPricing, bool) {
+	snap := deepSeekOfficial.Load()
+	if snap == nil {
+		return DeepSeekModelRate{}, DeepSeekOfficialPricing{}, false
+	}
+	rate, ok := snap.Models[normalizeDeepSeekFamily(model)]
+	if !ok {
+		return DeepSeekModelRate{}, *snap, false
+	}
+	return rate, *snap, true
+}
+
+// deepSeekOfficialPeakWindows 返回同步到的峰谷时段（未同步时 ok=false）。
+func deepSeekOfficialPeakWindows() (string, bool, []DeepSeekPeakWindow, bool) {
+	snap := deepSeekOfficial.Load()
+	if snap == nil || len(snap.PeakWindows) == 0 {
+		return "", true, nil, false
+	}
+	return snap.Timezone, snap.WeekdaysOnly, snap.PeakWindows, true
+}

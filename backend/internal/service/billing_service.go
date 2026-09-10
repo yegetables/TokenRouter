@@ -300,15 +300,22 @@ func resolvedChannelTimeMultiplier(resolved *ResolvedPricing, at time.Time) floa
 // ErrModelPricingUnavailable 表示当前所有定价来源都无法为请求模型提供价格。
 var ErrModelPricingUnavailable = errors.New("pricing not found")
 
-// DeepSeek 官方价卡以美元/token 表示；峰值时段为工作日 UTC 01:00–04:00
-// 与 06:00–10:00，峰值价格是低谷价格的 2 倍。
+// DeepSeek 官方价卡；峰值时段为工作日 UTC 01:00–04:00 与 06:00–10:00
+//（即北京时间 09:00–12:00 与 14:00–18:00），峰值价格是低谷价格的 2 倍。
+// 实际单价与峰谷时段由 deepseek_official_pricing.go 从官方定价页自动同步，
+// 下列常量仅作为同步不可用时的最终兜底。
 const (
+	// 2026-09 官方调价后谷价（人民币 / token）；仅在官方定价自动同步不可用时兜底，
+	// 正常运行时应以 deepseek_official_pricing.go 同步到的官方快照为准。
 	deepseekFlashOffPeakInputPrice  = 2.2e-7
 	deepseekFlashOffPeakOutputPrice = 6.6e-7
 	deepseekFlashOffPeakCacheRead   = 7e-9
 	deepseekProOffPeakInputPrice    = 6.6e-7
 	deepseekProOffPeakOutputPrice   = 1.98e-6
 	deepseekProOffPeakCacheRead     = 2.2e-8
+
+	// 官方高峰倍率兜底值（同步快照缺失该字段时使用）
+	deepSeekPeakMultiplierFallback = 2.0
 )
 
 // isDeepSeekModel 判断模型名是否属于 DeepSeek 系列，未知后缀也按 Flash 价卡处理。
@@ -332,12 +339,21 @@ func deepseekPeakMultiplierAt(now time.Time) float64 {
 
 // applyDeepSeekOfficialPricing 用官方低谷价覆盖远端或旧的 DeepSeek 价卡，
 // 保留其它能力字段，确保渠道/分组显式价格不会经过此函数。
+//
+// 价格来源优先级：官方定价自动同步快照（见 deepseek_official_pricing.go，
+// 默认取官方中文定价页，人民币原生价格）→ 内置常量兜底。
 func applyDeepSeekOfficialPricing(model string, pricing *ModelPricing) *ModelPricing {
 	if pricing == nil || !isDeepSeekModel(model) {
 		return pricing
 	}
 	cloned := *pricing
-	if strings.Contains(strings.ToLower(strings.TrimSpace(model)), "deepseek-v4-pro") {
+	if rate, _, ok := lookupDeepSeekOfficialRate(model); ok {
+		cloned.InputPricePerToken = rate.InputOffPeak
+		cloned.OutputPricePerToken = rate.OutputOffPeak
+		cloned.CacheReadPricePerToken = rate.InputCacheHitOffPeak
+		return &cloned
+	}
+	if isDeepSeekProFamily(model) {
 		cloned.InputPricePerToken = deepseekProOffPeakInputPrice
 		cloned.OutputPricePerToken = deepseekProOffPeakOutputPrice
 		cloned.CacheReadPricePerToken = deepseekProOffPeakCacheRead
@@ -349,6 +365,11 @@ func applyDeepSeekOfficialPricing(model string, pricing *ModelPricing) *ModelPri
 	return &cloned
 }
 
+// isDeepSeekProFamily 判断是否 Pro 家族（含版本化命名，如 deepseek-v4-pro-0813）。
+func isDeepSeekProFamily(model string) bool {
+	return strings.Contains(strings.ToLower(strings.TrimSpace(model)), "pro")
+}
+
 // applyDeepSeekPeakPricing 在默认模型价卡上叠加官方峰值倍率；自定义价格不应调用。
 func applyDeepSeekPeakPricing(model string, pricing *ModelPricing, pricingAt time.Time) *ModelPricing {
 	if pricing == nil || !isDeepSeekModel(model) {
@@ -357,7 +378,7 @@ func applyDeepSeekPeakPricing(model string, pricing *ModelPricing, pricingAt tim
 	if pricingAt.IsZero() {
 		pricingAt = timezone.Now()
 	}
-	multiplier := deepseekPeakMultiplierAt(pricingAt)
+	multiplier := deepseekPeakMultiplierFor(model, pricingAt)
 	if multiplier <= 1 {
 		return pricing
 	}
@@ -366,6 +387,44 @@ func applyDeepSeekPeakPricing(model string, pricing *ModelPricing, pricingAt tim
 	cloned.OutputPricePerToken *= multiplier
 	cloned.CacheReadPricePerToken *= multiplier
 	return &cloned
+}
+
+// deepseekPeakMultiplierFor 返回指定请求时刻的峰谷倍率。
+// 优先使用官方同步到的峰谷时段（含时区与工作日规则）；无快照时回退内置规则。
+func deepseekPeakMultiplierFor(model string, at time.Time) float64 {
+	if tzName, weekdaysOnly, windows, ok := deepSeekOfficialPeakWindows(); ok {
+		if !deepSeekWithinPeakWindow(at, tzName, weekdaysOnly, windows) {
+			return 1
+		}
+		if rate, _, ok := lookupDeepSeekOfficialRate(model); ok && rate.PeakMultiplier > 0 {
+			return rate.PeakMultiplier
+		}
+		return deepSeekPeakMultiplierFallback
+	}
+	return deepseekPeakMultiplierAt(at)
+}
+
+// deepSeekWithinPeakWindow 判断请求时刻是否落在官方高峰时段内。
+func deepSeekWithinPeakWindow(at time.Time, tzName string, weekdaysOnly bool, windows []DeepSeekPeakWindow) bool {
+	loc, err := time.LoadLocation(tzName)
+	if err != nil || loc == nil {
+		loc = time.FixedZone("Asia/Shanghai", 8*3600)
+	}
+	local := at.In(loc)
+	if weekdaysOnly && (local.Weekday() == time.Saturday || local.Weekday() == time.Sunday) {
+		return false
+	}
+	minutes := local.Hour()*60 + local.Minute()
+	for _, w := range windows {
+		start, end, err := parseClockRange(w.Start, w.End)
+		if err != nil {
+			continue
+		}
+		if minutes >= start && minutes < end {
+			return true
+		}
+	}
+	return false
 }
 
 // BillingService 计费服务
@@ -388,6 +447,9 @@ func NewBillingService(cfg *config.Config, pricingService *PricingService) *Bill
 
 	// 初始化硬编码回退价格（当动态价格不可用时使用）
 	s.initFallbackPricing()
+
+	// 启动 DeepSeek 官方定价与峰谷时段自动同步（官方无价格 API，抓取官方文档定价页）
+	StartDeepSeekOfficialPricingSync(cfg)
 
 	return s
 }

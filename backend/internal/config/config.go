@@ -663,6 +663,14 @@ type PricingConfig struct {
 	UpdateIntervalHours int `mapstructure:"update_interval_hours"`
 	// 哈希校验间隔（分钟）
 	HashCheckIntervalMinutes int `mapstructure:"hash_check_interval_minutes"`
+
+	// DeepSeek 官方定价与峰谷时段自动同步（官方无价格 API，抓取官方文档定价页）
+	// 数据源 URL，默认官方中文定价页（人民币原生价格）
+	DeepSeekPricingURL string `mapstructure:"deepseek_pricing_url"`
+	// 同步间隔（小时），默认 6
+	DeepSeekSyncIntervalHours int `mapstructure:"deepseek_sync_interval_hours"`
+	// 是否启用自动同步；未配置（nil）视为启用
+	DeepSeekAutoSync *bool `mapstructure:"deepseek_auto_sync"`
 }
 
 type ServerConfig struct {
@@ -2063,6 +2071,8 @@ func setDefaults() {
 	})
 	viper.SetDefault("security.url_allowlist.pricing_hosts", []string{
 		"raw.githubusercontent.com",
+		// DeepSeek 官方定价文档页（官方无价格 API，DeepSeek 官方定价自动同步需要抓取该页）
+		"api-docs.deepseek.com",
 	})
 	viper.SetDefault("security.url_allowlist.crs_hosts", []string{})
 	viper.SetDefault("security.url_allowlist.allow_private_hosts", true)
@@ -2311,6 +2321,11 @@ func setDefaults() {
 	viper.SetDefault("pricing.override_file", "")
 	viper.SetDefault("pricing.update_interval_hours", 24)
 	viper.SetDefault("pricing.hash_check_interval_minutes", 10)
+
+	// DeepSeek 官方定价自动同步（官方未提供价格 API，抓取官方文档定价页）
+	viper.SetDefault("pricing.deepseek_pricing_url", "https://api-docs.deepseek.com/zh-cn/quick_start/pricing")
+	viper.SetDefault("pricing.deepseek_sync_interval_hours", 6)
+	viper.SetDefault("pricing.deepseek_auto_sync", true)
 
 	// Timezone (default to Asia/Shanghai for Chinese users)
 	viper.SetDefault("timezone", "Asia/Shanghai")

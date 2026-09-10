@@ -1078,6 +1078,26 @@ pricing:
   # 哈希检查间隔（分钟）。每次检查同时比对远程目录哈希与本地 fallback/override 文件内容；
   # 删除本地文件会在下次检查时移除其条目，文件存在但不是 JSON 时保留旧数据、下次检查再试。
   hash_check_interval_minutes: 10
+  # ---------------------------------------------------------------------------
+  # DeepSeek 官方定价与峰谷时段自动同步
+  # ---------------------------------------------------------------------------
+  # DeepSeek 官方未提供价格查询 API（/v1/models 仅返回模型名、/user/balance 仅余额），
+  # 因此价格与峰谷时段从官方文档定价页自动解析并热更新，官方调价或峰谷时段调整
+  # 无需修改代码或升级镜像即可生效。解析失败时保留上一份成功快照，最终兜底为内置常量。
+  #
+  # 数据源 URL（默认官方中文定价页，人民币原生价格；改英文页则为美元计价）：
+  #   https://api-docs.deepseek.com/zh-cn/quick_start/pricing
+  # 若返回 JSON（未来官方若提供 API），可按以下结构解析：
+  #   {"currency":"CNY","timezone":"Asia/Shanghai","weekdays_only":true,
+  #    "peak_windows":[{"start":"09:00","end":"12:00"},{"start":"14:00","end":"18:00"}],
+  #    "models":{"deepseek-flash":{"input_off_peak":1e-6,"input_cache_hit_off_peak":2e-8,
+  #                                "output_off_peak":4e-6,"peak_multiplier":2}}}
+  # 注意：数据源主机需在 security.url_allowlist.pricing_hosts 白名单内。
+  # deepseek_pricing_url: "https://api-docs.deepseek.com/zh-cn/quick_start/pricing"
+  # 同步间隔（小时），默认 6
+  deepseek_sync_interval_hours: 6
+  # 是否启用自动同步，默认启用（设为 false 则仅使用内置常量）
+  # deepseek_auto_sync: true
 
 # =============================================================================
 # Billing Configuration
