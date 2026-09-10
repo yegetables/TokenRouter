@@ -23,7 +23,7 @@ type RequestableModelsResult struct {
 	Models                   []RequestableModel
 	Restricted               bool
 	HadExplicitAccountModels bool // 用于保持 /v1/models 的历史响应字段结构。
-	Metadata                 map[string]ModelContextMetadata
+	Metadata                 map[string]UpstreamModelMetadata
 }
 
 // ResolveRequestableModels 统一解析模型列表中的 R -> C -> U 链路。
@@ -103,7 +103,7 @@ func (s *GatewayService) resolveRequestableModelsWithAccounts(
 	}
 	// 上游 /v1/models 声明的上下文元数据（缺失时保持 nil，响应结构不变），
 	// 并在后台按 TTL 刷新过期快照，不阻塞本次请求。
-	result.Metadata = s.ModelContextMetadataForAccounts(accounts)
+	result.Metadata = s.UpstreamModelMetadataForAccounts(accounts)
 	s.scheduleUpstreamModelContextRefresh(accounts)
 	return result
 }

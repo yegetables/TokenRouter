@@ -28,32 +28,75 @@ const (
 	upstreamModelContextTimeout  = 15 * time.Second
 )
 
-// ModelContextMetadata 上游声明的模型上下文元数据。
-// 字段为 0 表示上游未提供该项，调用方必须省略该字段。
-type ModelContextMetadata struct {
+// UpstreamModelMetadata 上游 /v1/models 声明的可透传元数据
+// （上下文窗口、最大输出与能力标签）。
+//
+// 零值（0 / nil / 空切片）表示上游未提供该项，调用方必须省略该字段：
+// 不得按模型名、内置目录、价格阶梯或客户端能力猜测补齐。
+type UpstreamModelMetadata struct {
 	ContextLength       int `json:"context_length,omitempty"`
 	MaxCompletionTokens int `json:"max_completion_tokens,omitempty"`
+
+	// 能力标签用指针区分「上游未声明」与「上游显式声明 false」。
+	SupportsVision    *bool    `json:"supports_vision,omitempty"`
+	SupportsTools     *bool    `json:"supports_tools,omitempty"`
+	SupportsReasoning *bool    `json:"supports_reasoning,omitempty"`
+	SupportsResponses *bool    `json:"supports_responses,omitempty"`
+	SupportsAnthropic *bool    `json:"supports_anthropic,omitempty"`
+	ResponsesModes    []string `json:"responses_modes,omitempty"`
+	// ResponsesCapabilities 原样透传上游子树：结构随上游演进，网关不做字段映射。
+	ResponsesCapabilities json.RawMessage `json:"responses_capabilities,omitempty"`
 }
 
-func (m ModelContextMetadata) isZero() bool {
-	return m.ContextLength <= 0 && m.MaxCompletionTokens <= 0
+func (m UpstreamModelMetadata) isZero() bool {
+	return m.ContextLength <= 0 &&
+		m.MaxCompletionTokens <= 0 &&
+		m.SupportsVision == nil &&
+		m.SupportsTools == nil &&
+		m.SupportsReasoning == nil &&
+		m.SupportsResponses == nil &&
+		m.SupportsAnthropic == nil &&
+		len(m.ResponsesModes) == 0 &&
+		len(m.ResponsesCapabilities) == 0
 }
 
 // mergeFrom 用 other 补齐本值缺失的字段（多账号服务同一模型时合并信息）。
-func (m ModelContextMetadata) mergeFrom(other ModelContextMetadata) ModelContextMetadata {
+// 已声明项（含显式 false）优先于 other，不被覆盖。
+func (m UpstreamModelMetadata) mergeFrom(other UpstreamModelMetadata) UpstreamModelMetadata {
 	if m.ContextLength <= 0 {
 		m.ContextLength = other.ContextLength
 	}
 	if m.MaxCompletionTokens <= 0 {
 		m.MaxCompletionTokens = other.MaxCompletionTokens
 	}
+	if m.SupportsVision == nil {
+		m.SupportsVision = other.SupportsVision
+	}
+	if m.SupportsTools == nil {
+		m.SupportsTools = other.SupportsTools
+	}
+	if m.SupportsReasoning == nil {
+		m.SupportsReasoning = other.SupportsReasoning
+	}
+	if m.SupportsResponses == nil {
+		m.SupportsResponses = other.SupportsResponses
+	}
+	if m.SupportsAnthropic == nil {
+		m.SupportsAnthropic = other.SupportsAnthropic
+	}
+	if len(m.ResponsesModes) == 0 {
+		m.ResponsesModes = other.ResponsesModes
+	}
+	if len(m.ResponsesCapabilities) == 0 {
+		m.ResponsesCapabilities = other.ResponsesCapabilities
+	}
 	return m
 }
 
 type upstreamModelContextSnapshot struct {
-	FetchedAt string                          `json:"fetched_at"`
-	Source    string                          `json:"source,omitempty"`
-	Models    map[string]ModelContextMetadata `json:"models"`
+	FetchedAt string                           `json:"fetched_at"`
+	Source    string                           `json:"source,omitempty"`
+	Models    map[string]UpstreamModelMetadata `json:"models"`
 }
 
 var (
@@ -64,13 +107,13 @@ var (
 // upstreamModelContextRetryInterval 上次抓取失败后的最小重试间隔。
 const upstreamModelContextRetryInterval = 5 * time.Minute
 
-// ModelContextMetadataForAccounts 合并多个账号的上游上下文快照。
+// UpstreamModelMetadataForAccounts 合并多个账号的上游上下文快照。
 // 仅返回上游确实提供过信息的模型；无数据时返回 nil，调用方保持既有响应结构。
-func (s *GatewayService) ModelContextMetadataForAccounts(accounts []Account) map[string]ModelContextMetadata {
+func (s *GatewayService) UpstreamModelMetadataForAccounts(accounts []Account) map[string]UpstreamModelMetadata {
 	if len(accounts) == 0 {
 		return nil
 	}
-	merged := make(map[string]ModelContextMetadata)
+	merged := make(map[string]UpstreamModelMetadata)
 	for i := range accounts {
 		snap := parseUpstreamModelContextSnapshot(accounts[i].Extra)
 		if snap == nil {
@@ -171,13 +214,20 @@ func (s *GatewayService) refreshUpstreamModelContext(ctx context.Context, accoun
 		return err
 	}
 
-	// 上游未声明的模型不入快照；若整个上游都没有上下文信息，仍写入空快照，
+	// 上游未声明的模型不入快照；若整个上游都没有可透传元数据，仍写入空快照，
 	// 以便 TTL 生效、避免每次请求都重复抓取。
-	models := make(map[string]ModelContextMetadata, len(infos))
+	models := make(map[string]UpstreamModelMetadata, len(infos))
 	for _, info := range infos {
-		meta := ModelContextMetadata{
-			ContextLength:       info.ContextLength,
-			MaxCompletionTokens: info.MaxCompletionTokens,
+		meta := UpstreamModelMetadata{
+			ContextLength:         info.ContextLength,
+			MaxCompletionTokens:   info.MaxCompletionTokens,
+			SupportsVision:        info.SupportsVision,
+			SupportsTools:         info.SupportsTools,
+			SupportsReasoning:     info.SupportsReasoning,
+			SupportsResponses:     info.SupportsResponses,
+			SupportsAnthropic:     info.SupportsAnthropic,
+			ResponsesModes:        info.ResponsesModes,
+			ResponsesCapabilities: info.ResponsesCapabilities,
 		}
 		if meta.isZero() {
 			continue

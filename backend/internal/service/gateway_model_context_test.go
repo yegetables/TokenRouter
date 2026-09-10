@@ -55,11 +55,19 @@ func (s *modelContextHTTPUpstreamStub) Do(req *http.Request, _ string, _ int64, 
 	}, nil
 }
 
-// 上游带上下文信息（TokenRhythm 形态）与不带上下文（DeepSeek 形态）两种响应。
+// 上游带元数据（TokenRhythm 形态，含能力标签与边界值）与不带元数据（DeepSeek 形态）。
 const (
 	upstreamModelsWithContext = `{"object":"list","data":[
-		{"id":"glm-5.1","object":"model","context_length":200000,"max_completion_tokens":128000},
-		{"id":"minimax-m2.7","object":"model","context_window":200000,"max_output_tokens":192000},
+		{"id":"glm-5.1","object":"model","context_length":200000,"max_completion_tokens":128000,
+		 "supports_vision":false,"supports_tools":true,"supports_reasoning":true,
+		 "supports_responses":true,"supports_anthropic":true,
+		 "responses_modes":["native"],
+		 "responses_capabilities":{"available":true,"modes":["native"],"stream":true,"tools":true,
+		   "background":false,"compact":false,"webSearch":false,"mcp":false,
+		   "codeInterpreter":false,"imageGeneration":false,"fileSearch":false,"cancel":false}},
+		{"id":"minimax-m2.7","object":"model","context_window":200000,"max_output_tokens":192000,
+		 "supports_vision":true,"responses_modes":[],"responses_capabilities":null},
+		{"id":"caps-only","object":"model","supports_vision":true},
 		{"id":"plain-model","object":"model"}
 	]}`
 	upstreamModelsWithoutContext = `{"object":"list","data":[
@@ -71,7 +79,7 @@ const (
 func TestExtractUpstreamModelInfos(t *testing.T) {
 	infos, err := extractUpstreamModelInfos([]byte(upstreamModelsWithContext))
 	require.NoError(t, err)
-	require.Len(t, infos, 3)
+	require.Len(t, infos, 4)
 
 	byID := make(map[string]UpstreamModelInfo, len(infos))
 	for _, info := range infos {
@@ -85,6 +93,31 @@ func TestExtractUpstreamModelInfos(t *testing.T) {
 	// 上游未声明上下文时保持 0，表示未知（不得猜测填充）
 	require.Zero(t, byID["plain-model"].ContextLength)
 	require.Zero(t, byID["plain-model"].MaxCompletionTokens)
+
+	// 能力标签：显式 false 与显式 true 都要原样保留（指针区分「未声明」与「false」）
+	require.NotNil(t, byID["glm-5.1"].SupportsVision)
+	require.False(t, *byID["glm-5.1"].SupportsVision)
+	require.True(t, *byID["glm-5.1"].SupportsTools)
+	require.True(t, *byID["glm-5.1"].SupportsReasoning)
+	require.True(t, *byID["glm-5.1"].SupportsResponses)
+	require.True(t, *byID["glm-5.1"].SupportsAnthropic)
+	require.Equal(t, []string{"native"}, byID["glm-5.1"].ResponsesModes)
+	require.JSONEq(t, `{"available":true,"modes":["native"],"stream":true,"tools":true,
+		"background":false,"compact":false,"webSearch":false,"mcp":false,
+		"codeInterpreter":false,"imageGeneration":false,"fileSearch":false,"cancel":false}`,
+		string(byID["glm-5.1"].ResponsesCapabilities))
+	// 空数组 / JSON null 归一为 nil（与「未声明」同义，避免下发空值或 null）
+	require.True(t, *byID["minimax-m2.7"].SupportsVision)
+	require.Nil(t, byID["minimax-m2.7"].ResponsesModes)
+	require.Nil(t, byID["minimax-m2.7"].ResponsesCapabilities)
+	// 只声明能力标签、没有上下文数字的模型也要保留
+	require.True(t, *byID["caps-only"].SupportsVision)
+	require.Zero(t, byID["caps-only"].ContextLength)
+	// 完全未声明的模型：所有字段为零值
+	require.Nil(t, byID["plain-model"].SupportsVision)
+	require.Nil(t, byID["plain-model"].SupportsTools)
+	require.Nil(t, byID["plain-model"].ResponsesModes)
+	require.Nil(t, byID["plain-model"].ResponsesCapabilities)
 
 	// 上游不提供上下文信息（DeepSeek /v1/models）时全部为 0
 	infos, err = extractUpstreamModelInfos([]byte(upstreamModelsWithoutContext))
@@ -105,13 +138,13 @@ func TestExtractUpstreamModelInfos(t *testing.T) {
 	require.Error(t, parseErr)
 }
 
-func TestModelContextMetadataForAccounts(t *testing.T) {
+func TestUpstreamModelMetadataForAccounts(t *testing.T) {
 	svc := &GatewayService{}
 
 	// 无账号 / 无快照 → nil（调用方保持既有响应结构）
-	require.Nil(t, svc.ModelContextMetadataForAccounts(nil))
-	require.Nil(t, svc.ModelContextMetadataForAccounts([]Account{{ID: 1}}))
-	require.Nil(t, svc.ModelContextMetadataForAccounts([]Account{{ID: 1, Extra: map[string]any{
+	require.Nil(t, svc.UpstreamModelMetadataForAccounts(nil))
+	require.Nil(t, svc.UpstreamModelMetadataForAccounts([]Account{{ID: 1}}))
+	require.Nil(t, svc.UpstreamModelMetadataForAccounts([]Account{{ID: 1, Extra: map[string]any{
 		upstreamModelContextExtraKey: map[string]any{"fetched_at": "2026-09-10T00:00:00Z", "models": map[string]any{}},
 	}}}))
 
@@ -139,7 +172,7 @@ func TestModelContextMetadataForAccounts(t *testing.T) {
 		{ID: 3, Extra: map[string]any{upstreamModelContextExtraKey: "not-an-object"}},
 	}
 
-	metadata := svc.ModelContextMetadataForAccounts(accounts)
+	metadata := svc.UpstreamModelMetadataForAccounts(accounts)
 	require.Len(t, metadata, 2)
 	require.Equal(t, 200000, metadata["glm-5.1"].ContextLength)
 	require.Equal(t, 128000, metadata["glm-5.1"].MaxCompletionTokens) // 多账号合并补齐
@@ -178,7 +211,12 @@ func TestRefreshUpstreamModelContextPersistsAndSkipsUpstreamWithoutContext(t *te
 		require.NoError(t, err)
 		require.Contains(t, string(snapshot), `"context_length":200000`)
 		require.Contains(t, string(snapshot), `"max_completion_tokens":128000`)
-		require.NotContains(t, string(snapshot), "plain-model", "无上下文的模型不落快照")
+		require.Contains(t, string(snapshot), `"supports_tools":true`)
+		require.Contains(t, string(snapshot), `"supports_vision":false`, "显式 false 必须保留")
+		require.Contains(t, string(snapshot), `"responses_modes":["native"]`)
+		require.Contains(t, string(snapshot), `"responses_capabilities"`)
+		require.Contains(t, string(snapshot), "caps-only", "仅声明能力标签的模型同样落快照")
+		require.NotContains(t, string(snapshot), "plain-model", "未声明任何元数据的模型不落快照")
 	})
 
 	t.Run("上游不提供上下文时写入空快照以生效 TTL", func(t *testing.T) {
@@ -283,6 +321,68 @@ func TestScheduleUpstreamModelContextRefresh(t *testing.T) {
 		time.Sleep(80 * time.Millisecond)
 		require.Zero(t, upstream.calls, "退避窗口内不应发起上游抓取")
 	})
+}
+
+// 多账号合并时：已有声明（含显式 false）不被更完整的一方覆盖；
+// 只有能力标签的模型不会被 isZero 丢弃。
+func TestUpstreamModelMetadataMergePreservesDeclaredFields(t *testing.T) {
+	svc := &GatewayService{}
+	explicitFalse := false
+	accounts := []Account{
+		{ID: 1, Extra: map[string]any{
+			upstreamModelContextExtraKey: map[string]any{
+				"fetched_at": "2026-09-10T00:00:00Z",
+				"models": map[string]any{
+					"glm-5.1": map[string]any{
+						"supports_vision": false,
+						"responses_modes": []any{"native"},
+					},
+					"caps-only": map[string]any{"supports_tools": true},
+				},
+			},
+		}},
+		{ID: 2, Extra: map[string]any{
+			upstreamModelContextExtraKey: map[string]any{
+				"fetched_at": "2026-09-10T00:00:00Z",
+				"models": map[string]any{
+					"glm-5.1": map[string]any{
+						"context_length":  200000,
+						"supports_vision": true, // 不应覆盖账号 1 的显式 false
+						"supports_tools":  true,
+					},
+					"caps-only": map[string]any{"context_length": 128000},
+				},
+			},
+		}},
+	}
+
+	metadata := svc.UpstreamModelMetadataForAccounts(accounts)
+	require.Len(t, metadata, 2)
+
+	glm := metadata["glm-5.1"]
+	require.NotNil(t, glm.SupportsVision)
+	require.False(t, *glm.SupportsVision, "已声明的显式 false 不被其它账号覆盖")
+	require.Equal(t, explicitFalse, *glm.SupportsVision)
+	require.NotNil(t, glm.SupportsTools)
+	require.True(t, *glm.SupportsTools)
+	require.Equal(t, 200000, glm.ContextLength, "缺失字段由其它账号补齐")
+	require.Equal(t, []string{"native"}, glm.ResponsesModes)
+
+	capsOnly := metadata["caps-only"]
+	require.NotNil(t, capsOnly.SupportsTools)
+	require.Equal(t, 128000, capsOnly.ContextLength)
+}
+
+// 单元级别确认：只带能力标签的元数据不被视为空值。
+func TestUpstreamModelMetadataIsZero(t *testing.T) {
+	require.True(t, UpstreamModelMetadata{}.isZero())
+	require.True(t, UpstreamModelMetadata{ContextLength: 0, ResponsesModes: nil}.isZero())
+
+	enabled := true
+	require.False(t, UpstreamModelMetadata{SupportsVision: &enabled}.isZero())
+	require.False(t, UpstreamModelMetadata{ContextLength: 1000}.isZero())
+	require.False(t, UpstreamModelMetadata{ResponsesModes: []string{"native"}}.isZero())
+	require.False(t, UpstreamModelMetadata{ResponsesCapabilities: json.RawMessage(`{"available":true}`)}.isZero())
 }
 
 func TestSupportsUpstreamModelContextSync(t *testing.T) {

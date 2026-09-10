@@ -128,9 +128,17 @@ type Model struct {
 	DisplayName string `json:"display_name"`
 	CreatedAt   string `json:"created_at"`
 
-	// 上游声明的上下文元数据（可选）：仅当上游 /v1/models 提供时透传，缺失时省略字段。
-	ContextLength       int `json:"context_length,omitempty"`
-	MaxCompletionTokens int `json:"max_completion_tokens,omitempty"`
+	// 上游声明的元数据（可选）：仅当上游 /v1/models 声明时透传，缺失时省略字段。
+	// 网关不猜测、不按内置目录或模型名补齐；能力标签的 false 是上游的显式声明。
+	ContextLength         int      `json:"context_length,omitempty"`
+	MaxCompletionTokens   int      `json:"max_completion_tokens,omitempty"`
+	SupportsVision        *bool    `json:"supports_vision,omitempty"`
+	SupportsTools         *bool    `json:"supports_tools,omitempty"`
+	SupportsReasoning     *bool    `json:"supports_reasoning,omitempty"`
+	SupportsResponses     *bool    `json:"supports_responses,omitempty"`
+	SupportsAnthropic     *bool    `json:"supports_anthropic,omitempty"`
+	ResponsesModes        []string `json:"responses_modes,omitempty"`
+	ResponsesCapabilities any      `json:"responses_capabilities,omitempty"`
 }
 
 // DefaultModels Claude Code 客户端支持的默认模型列表

@@ -1149,7 +1149,7 @@ func (h *GatewayHandler) Models(c *gin.Context) {
 // compositeRequestableModels 按映射顺序聚合可请求模型，并在模型 ID 前添加展示前缀。
 // 严格指定订阅时，列表只能包含套餐覆盖的分组，避免将随后必然拒绝的模型暴露给客户端。
 // 返回的元数据键与展示用的带前缀模型 ID 一致。
-func (h *GatewayHandler) compositeRequestableModels(c *gin.Context, apiKey *service.APIKey, requiredPlatform string) ([]string, map[string]service.ModelContextMetadata) {
+func (h *GatewayHandler) compositeRequestableModels(c *gin.Context, apiKey *service.APIKey, requiredPlatform string) ([]string, map[string]service.UpstreamModelMetadata) {
 	if h == nil || h.gatewayService == nil || c == nil || c.Request == nil || apiKey == nil {
 		return nil, nil
 	}
@@ -1159,7 +1159,7 @@ func (h *GatewayHandler) compositeRequestableModels(c *gin.Context, apiKey *serv
 	}
 	ctx := c.Request.Context()
 	models := make([]string, 0)
-	metadata := make(map[string]service.ModelContextMetadata)
+	metadata := make(map[string]service.UpstreamModelMetadata)
 	seen := make(map[string]struct{})
 	for _, binding := range apiKey.CompositeGroups {
 		group := binding.Group
@@ -1216,29 +1216,33 @@ func compositeGroupAvailableToUser(apiKey *service.APIKey, preferredSubscription
 	return apiKey.User.CanBindGroup(group.ID, group.IsExclusive)
 }
 
+// compositeModelEntry 复合 Key 形态的条目：OpenAI 模型字段 + Claude 兼容的 created_at。
+// 直接复用 openai.Model，使复合形态与 OpenAI 形态共享同一套上游元数据填充逻辑，
+// 避免字段新增时这里被漏掉（历史上两处各写一份展开逻辑导致过不一致）。
+type compositeModelEntry struct {
+	openai.Model
+	CreatedAt string `json:"created_at"`
+}
+
 // writeCompositeModelsList 返回同时兼容 OpenAI 与 Anthropic 常用字段的模型列表。
-func writeCompositeModelsList(c *gin.Context, modelIDs []string, metadata map[string]service.ModelContextMetadata) {
-	models := make([]gin.H, 0, len(modelIDs))
+func writeCompositeModelsList(c *gin.Context, modelIDs []string, metadata map[string]service.UpstreamModelMetadata) {
+	models := make([]compositeModelEntry, 0, len(modelIDs))
 	for _, modelID := range modelIDs {
-		item := gin.H{
-			"id": modelID, "object": "model", "type": "model", "created": 1704067200,
-			"created_at": "2024-01-01T00:00:00Z", "owned_by": "token-router", "display_name": modelID,
+		entry := compositeModelEntry{
+			Model: openai.Model{
+				ID: modelID, Object: "model", Created: 1704067200,
+				OwnedBy: "token-router", Type: "model", DisplayName: modelID,
+			},
+			CreatedAt: "2024-01-01T00:00:00Z",
 		}
-		// 上游声明了上下文信息才追加字段，未提供时保持历史响应结构。
-		if meta, ok := metadata[modelID]; ok {
-			if meta.ContextLength > 0 {
-				item["context_length"] = meta.ContextLength
-			}
-			if meta.MaxCompletionTokens > 0 {
-				item["max_completion_tokens"] = meta.MaxCompletionTokens
-			}
-		}
-		models = append(models, item)
+		// 上游声明了元数据才出现字段，未提供时保持历史响应结构。
+		applyOpenAIUpstreamModelMetadata(&entry.Model, metadata[modelID])
+		models = append(models, entry)
 	}
 	c.JSON(http.StatusOK, gin.H{"object": "list", "data": models})
 }
 
-func writeModelsList(c *gin.Context, modelIDs []string, metadata map[string]service.ModelContextMetadata) {
+func writeModelsList(c *gin.Context, modelIDs []string, metadata map[string]service.UpstreamModelMetadata) {
 	models := make([]claude.Model, 0, len(modelIDs))
 	for _, modelID := range modelIDs {
 		entry := claude.Model{
@@ -1247,7 +1251,7 @@ func writeModelsList(c *gin.Context, modelIDs []string, metadata map[string]serv
 			DisplayName: modelID,
 			CreatedAt:   "2024-01-01T00:00:00Z",
 		}
-		applyClaudeModelContextMetadata(&entry, metadata[modelID])
+		applyClaudeUpstreamModelMetadata(&entry, metadata[modelID])
 		models = append(models, entry)
 	}
 	c.JSON(http.StatusOK, gin.H{
@@ -1257,7 +1261,7 @@ func writeModelsList(c *gin.Context, modelIDs []string, metadata map[string]serv
 }
 
 // writeCustomModelsList 保持分组自定义列表原有的响应结构。
-func writeCustomModelsList(c *gin.Context, platform string, modelIDs []string, metadata map[string]service.ModelContextMetadata) {
+func writeCustomModelsList(c *gin.Context, platform string, modelIDs []string, metadata map[string]service.UpstreamModelMetadata) {
 	switch platform {
 	case service.PlatformOpenAI:
 		writeOpenAIModelsList(c, modelIDs, metadata)
@@ -1340,7 +1344,7 @@ func grokModelSupportsConfigurableReasoning(modelID string) bool {
 }
 
 // writeDefaultModelsList 保持各平台默认回退列表原有的响应结构和展示元数据。
-func writeDefaultModelsList(c *gin.Context, platform string, modelIDs []string, metadata map[string]service.ModelContextMetadata) {
+func writeDefaultModelsList(c *gin.Context, platform string, modelIDs []string, metadata map[string]service.UpstreamModelMetadata) {
 	switch platform {
 	case service.PlatformOpenAI:
 		writeOpenAIModelsList(c, modelIDs, metadata)
@@ -1353,7 +1357,7 @@ func writeDefaultModelsList(c *gin.Context, platform string, modelIDs []string, 
 	}
 }
 
-func writeOpenAIModelsList(c *gin.Context, modelIDs []string, metadata map[string]service.ModelContextMetadata) {
+func writeOpenAIModelsList(c *gin.Context, modelIDs []string, metadata map[string]service.UpstreamModelMetadata) {
 	defaultsByID := make(map[string]openai.Model, len(openai.DefaultModels))
 	for _, model := range openai.DefaultModels {
 		defaultsByID[model.ID] = model
@@ -1362,7 +1366,7 @@ func writeOpenAIModelsList(c *gin.Context, modelIDs []string, metadata map[strin
 	models := make([]openai.Model, 0, len(modelIDs))
 	for _, modelID := range modelIDs {
 		if model, ok := defaultsByID[modelID]; ok {
-			applyOpenAIModelContextMetadata(&model, metadata[modelID])
+			applyOpenAIUpstreamModelMetadata(&model, metadata[modelID])
 			models = append(models, model)
 			continue
 		}
@@ -1374,7 +1378,7 @@ func writeOpenAIModelsList(c *gin.Context, modelIDs []string, metadata map[strin
 			Type:        "model",
 			DisplayName: modelID,
 		}
-		applyOpenAIModelContextMetadata(&entry, metadata[modelID])
+		applyOpenAIUpstreamModelMetadata(&entry, metadata[modelID])
 		models = append(models, entry)
 	}
 	c.JSON(http.StatusOK, gin.H{
@@ -1383,34 +1387,45 @@ func writeOpenAIModelsList(c *gin.Context, modelIDs []string, metadata map[strin
 	})
 }
 
-// applyOpenAIModelContextMetadata 仅在上游提供该字段时写入，缺失时保持零值（序列化省略）。
-func applyOpenAIModelContextMetadata(model *openai.Model, meta service.ModelContextMetadata) {
+// applyOpenAIUpstreamModelMetadata 仅在上游声明该字段时写入，缺失时保持零值（序列化省略）。
+// 直接赋值即可：零值 / nil / 空切片都会因 omitempty 而省略，显式 false 会被保留。
+func applyOpenAIUpstreamModelMetadata(model *openai.Model, meta service.UpstreamModelMetadata) {
 	if model == nil {
 		return
 	}
-	if meta.ContextLength > 0 {
-		model.ContextLength = meta.ContextLength
-	}
-	if meta.MaxCompletionTokens > 0 {
-		model.MaxCompletionTokens = meta.MaxCompletionTokens
+	model.ContextLength = meta.ContextLength
+	model.MaxCompletionTokens = meta.MaxCompletionTokens
+	model.SupportsVision = meta.SupportsVision
+	model.SupportsTools = meta.SupportsTools
+	model.SupportsReasoning = meta.SupportsReasoning
+	model.SupportsResponses = meta.SupportsResponses
+	model.SupportsAnthropic = meta.SupportsAnthropic
+	model.ResponsesModes = meta.ResponsesModes
+	if len(meta.ResponsesCapabilities) > 0 {
+		model.ResponsesCapabilities = meta.ResponsesCapabilities
 	}
 }
 
-// applyClaudeModelContextMetadata 仅在上游提供该字段时写入，缺失时保持零值（序列化省略）。
-func applyClaudeModelContextMetadata(model *claude.Model, meta service.ModelContextMetadata) {
+// applyClaudeUpstreamModelMetadata 仅在上游提供该字段时写入，缺失时保持零值（序列化省略）。
+func applyClaudeUpstreamModelMetadata(model *claude.Model, meta service.UpstreamModelMetadata) {
 	if model == nil {
 		return
 	}
-	if meta.ContextLength > 0 {
-		model.ContextLength = meta.ContextLength
-	}
-	if meta.MaxCompletionTokens > 0 {
-		model.MaxCompletionTokens = meta.MaxCompletionTokens
+	model.ContextLength = meta.ContextLength
+	model.MaxCompletionTokens = meta.MaxCompletionTokens
+	model.SupportsVision = meta.SupportsVision
+	model.SupportsTools = meta.SupportsTools
+	model.SupportsReasoning = meta.SupportsReasoning
+	model.SupportsResponses = meta.SupportsResponses
+	model.SupportsAnthropic = meta.SupportsAnthropic
+	model.ResponsesModes = meta.ResponsesModes
+	if len(meta.ResponsesCapabilities) > 0 {
+		model.ResponsesCapabilities = meta.ResponsesCapabilities
 	}
 }
 
 // writeClaudeCompatiblePlatformModelsList 保留各平台默认模型的展示元数据。
-func writeClaudeCompatiblePlatformModelsList(c *gin.Context, platform string, modelIDs []string, metadata map[string]service.ModelContextMetadata) {
+func writeClaudeCompatiblePlatformModelsList(c *gin.Context, platform string, modelIDs []string, metadata map[string]service.UpstreamModelMetadata) {
 	defaultsByID := make(map[string]claude.Model)
 	appendDefault := func(id, modelType, displayName, createdAt string) {
 		defaultsByID[id] = claude.Model{
@@ -1443,7 +1458,7 @@ func writeClaudeCompatiblePlatformModelsList(c *gin.Context, platform string, mo
 	models := make([]claude.Model, 0, len(modelIDs))
 	for _, modelID := range modelIDs {
 		if model, ok := defaultsByID[modelID]; ok {
-			applyClaudeModelContextMetadata(&model, metadata[modelID])
+			applyClaudeUpstreamModelMetadata(&model, metadata[modelID])
 			models = append(models, model)
 			continue
 		}
@@ -1453,7 +1468,7 @@ func writeClaudeCompatiblePlatformModelsList(c *gin.Context, platform string, mo
 			DisplayName: modelID,
 			CreatedAt:   "2024-01-01T00:00:00Z",
 		}
-		applyClaudeModelContextMetadata(&entry, metadata[modelID])
+		applyClaudeUpstreamModelMetadata(&entry, metadata[modelID])
 		models = append(models, entry)
 	}
 	c.JSON(http.StatusOK, gin.H{

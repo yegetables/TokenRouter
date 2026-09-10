@@ -585,14 +585,33 @@ type upstreamModelEntry struct {
 	MaxInputTokens      int `json:"max_input_tokens"`
 	MaxCompletionTokens int `json:"max_completion_tokens"`
 	MaxOutputTokens     int `json:"max_output_tokens"`
+
+	// 能力元数据（可选）：指针区分「上游未声明」与「显式 false」。
+	SupportsVision    *bool    `json:"supports_vision"`
+	SupportsTools     *bool    `json:"supports_tools"`
+	SupportsReasoning *bool    `json:"supports_reasoning"`
+	SupportsResponses *bool    `json:"supports_responses"`
+	SupportsAnthropic *bool    `json:"supports_anthropic"`
+	ResponsesModes    []string `json:"responses_modes"`
+	// ResponsesCapabilities 原样保留上游子树（结构随上游演进，网关不做字段映射）。
+	ResponsesCapabilities json.RawMessage `json:"responses_capabilities"`
 }
 
-// UpstreamModelInfo 上游模型条目及其可选上下文元数据。
-// 字段为 0 表示上游未提供该项，调用方须保持既有响应结构，不得猜测填充。
+// UpstreamModelInfo 上游模型条目及其可选元数据。
+// 零值（0 / nil / 空切片）表示上游未提供该项，调用方须保持既有响应结构，
+// 不得按模型名、内置目录或价格阶梯猜测填充。
 type UpstreamModelInfo struct {
 	ID                  string
 	ContextLength       int
 	MaxCompletionTokens int
+
+	SupportsVision        *bool
+	SupportsTools         *bool
+	SupportsReasoning     *bool
+	SupportsResponses     *bool
+	SupportsAnthropic     *bool
+	ResponsesModes        []string
+	ResponsesCapabilities json.RawMessage
 }
 
 type upstreamModelEntryMetadata struct {
@@ -623,8 +642,9 @@ func extractUpstreamModelIDsWithSelector(body []byte, selectID func(upstreamMode
 	return dedupeAndSortModelIDs(models), nil
 }
 
-// extractUpstreamModelInfos 解析上游模型列表并保留上下文元数据。
-// 与 extractUpstreamModelIDs 使用同一套条目解析规则，额外读取上游声明的上下文字段。
+// extractUpstreamModelInfos 解析上游模型列表并保留可透传的元数据
+// （上下文窗口、最大输出与上游声明的能力标签）。
+// 与 extractUpstreamModelIDs 使用同一套条目解析规则。
 func extractUpstreamModelInfos(body []byte) ([]UpstreamModelInfo, error) {
 	entries, err := parseUpstreamModelEntries(body)
 	if err != nil {
@@ -642,12 +662,43 @@ func extractUpstreamModelInfos(body []byte) ([]UpstreamModelInfo, error) {
 		}
 		seen[modelID] = struct{}{}
 		infos = append(infos, UpstreamModelInfo{
-			ID:                  modelID,
-			ContextLength:       firstPositive(entry.ContextLength, entry.ContextWindow, entry.MaxInputTokens),
-			MaxCompletionTokens: firstPositive(entry.MaxCompletionTokens, entry.MaxOutputTokens),
+			ID:                    modelID,
+			ContextLength:         firstPositive(entry.ContextLength, entry.ContextWindow, entry.MaxInputTokens),
+			MaxCompletionTokens:   firstPositive(entry.MaxCompletionTokens, entry.MaxOutputTokens),
+			SupportsVision:        entry.SupportsVision,
+			SupportsTools:         entry.SupportsTools,
+			SupportsReasoning:     entry.SupportsReasoning,
+			SupportsResponses:     entry.SupportsResponses,
+			SupportsAnthropic:     entry.SupportsAnthropic,
+			ResponsesModes:        normalizeUpstreamStringList(entry.ResponsesModes),
+			ResponsesCapabilities: normalizeUpstreamRawJSON(entry.ResponsesCapabilities),
 		})
 	}
 	return infos, nil
+}
+
+// normalizeUpstreamStringList 空切片归一为 nil（“上游未声明”与“声明为空”对客户端等价，
+// 统一按未声明处理，保持响应结构与历史一致）。
+func normalizeUpstreamStringList(values []string) []string {
+	out := make([]string, 0, len(values))
+	for _, v := range values {
+		if trimmed := strings.TrimSpace(v); trimmed != "" {
+			out = append(out, trimmed)
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+// normalizeUpstreamRawJSON 空值与 JSON null 归一为 nil，避免把 null 透传给客户端。
+func normalizeUpstreamRawJSON(raw json.RawMessage) json.RawMessage {
+	trimmed := strings.TrimSpace(string(raw))
+	if trimmed == "" || trimmed == "null" {
+		return nil
+	}
+	return raw
 }
 
 // parseUpstreamModelEntries 解析 {data|models:[...]} 或裸数组形态的上游模型列表。
