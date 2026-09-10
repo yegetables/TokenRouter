@@ -81,6 +81,9 @@ func (s *SettingService) UpdateSettingsWithAuthSourceDefaultsOmitting(ctx contex
 // refreshCachedSettingsAfterWrite 使进程内缓存与刚完成的写入保持一致。
 // 部分载荷会把省略字段表示为零值，因此此时必须从存储重建缓存，而不能使用请求结构体。
 func (s *SettingService) refreshCachedSettingsAfterWrite(ctx context.Context, settings *SystemSettings, omitted OmittedSettingKeys) {
+	// 设置写入可能改了站点展示币种（balance_unit_name）：立即失效 DeepSeek 官方价
+	// 的币种缓存，使计费切换到同口径的官方数字，无需等待 TTL 自然过期。
+	InvalidateDeepSeekPricingCurrencyCache()
 	if len(omitted) == 0 {
 		s.refreshCachedSettings(settings)
 		return

@@ -38,6 +38,9 @@ func TestDeepseekPeakMultiplierAt(t *testing.T) {
 }
 
 func TestGetModelPricing_DeepseekUsesOfficialRatesForStaleEntries(t *testing.T) {
+	// 内置兜底常量是人民币口径：站点展示币种为 CNY 时覆盖陈旧目录条目。
+	// 站点为其它币种时必须拒绝套用，见 TestGetModelPricing_DeepseekSkipsCNYFallbackOnUSDSite。
+	useDeepSeekSiteCurrency(t, "CNY")
 	pricingService := &PricingService{pricingData: map[string]*LiteLLMModelPricing{
 		"deepseek-v4-pro":      {InputCostPerToken: 1e-6, OutputCostPerToken: 2e-6, CacheReadInputTokenCost: 3e-8},
 		"deepseek-v4-flash":    {InputCostPerToken: 1e-6, OutputCostPerToken: 2e-6, CacheReadInputTokenCost: 3e-8},
@@ -64,6 +67,22 @@ func TestGetModelPricing_DeepseekUsesOfficialRatesForStaleEntries(t *testing.T) 
 			require.InDelta(t, tt.cached, pricing.CacheReadPricePerToken, 1e-15)
 		})
 	}
+}
+
+// 站点展示币种为 USD 且没有美元官方价快照时，不得用人民币常量覆盖价卡
+// （否则人民币数字会被当成美元记账），必须保持上游价卡数值。
+func TestGetModelPricing_DeepseekSkipsCNYFallbackOnUSDSite(t *testing.T) {
+	useDeepSeekSiteCurrency(t, "USD")
+	pricingService := &PricingService{pricingData: map[string]*LiteLLMModelPricing{
+		"deepseek-v4-flash": {InputCostPerToken: 0.15e-6, OutputCostPerToken: 0.6e-6, CacheReadInputTokenCost: 3e-9},
+	}}
+	bs := NewBillingService(&config.Config{}, pricingService)
+
+	pricing, err := bs.GetModelPricing("deepseek-v4-flash")
+	require.NoError(t, err)
+	require.InDelta(t, 0.15e-6, pricing.InputPricePerToken, 1e-18)
+	require.InDelta(t, 0.6e-6, pricing.OutputPricePerToken, 1e-18)
+	require.InDelta(t, 3e-9, pricing.CacheReadPricePerToken, 1e-18)
 }
 
 func TestCalculateCostUnified_DeepseekPeakDoesNotOverrideGroupPricing(t *testing.T) {

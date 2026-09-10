@@ -305,8 +305,10 @@ var ErrModelPricingUnavailable = errors.New("pricing not found")
 // 实际单价与峰谷时段由 deepseek_official_pricing.go 从官方定价页自动同步，
 // 下列常量仅作为同步不可用时的最终兜底。
 const (
-	// 2026-09 官方调价后谷价（人民币 / token）；仅在官方定价自动同步不可用时兜底，
-	// 正常运行时应以 deepseek_official_pricing.go 同步到的官方快照为准。
+	// 2026-09 官方调价后谷价（人民币 / token，即 deepSeekFallbackConstantsCurrency 口径）；
+	// 仅在官方定价自动同步不可用时兜底，正常运行应以 deepseek_official_pricing.go 同步到的
+	// 官方快照为准。站点展示币种与该口径不一致时不套用这些常量，见
+	// applyDeepSeekOfficialPricing。
 	deepseekFlashOffPeakInputPrice  = 2.2e-7
 	deepseekFlashOffPeakOutputPrice = 6.6e-7
 	deepseekFlashOffPeakCacheRead   = 7e-9
@@ -340,8 +342,13 @@ func deepseekPeakMultiplierAt(now time.Time) float64 {
 // applyDeepSeekOfficialPricing 用官方低谷价覆盖远端或旧的 DeepSeek 价卡，
 // 保留其它能力字段，确保渠道/分组显式价格不会经过此函数。
 //
-// 价格来源优先级：官方定价自动同步快照（见 deepseek_official_pricing.go，
-// 默认取官方中文定价页，人民币原生价格）→ 内置常量兜底。
+// 价格来源优先级：官方定价自动同步快照中「与站点展示币种同口径」的那一套
+// （见 deepseek_official_pricing.go 与 deepseek_pricing_currency.go）
+// → 内置常量兜底。
+//
+// 内置常量是人民币口径（deepSeekFallbackConstantsCurrency）。站点展示币种与之
+// 不一致时（例如站点为 USD 但尚未同步到美元官方价）不得用常量覆盖，保持上游价卡
+// 数字，避免把人民币数字当成美元记账；美元官方价同步到位后自动接管。
 func applyDeepSeekOfficialPricing(model string, pricing *ModelPricing) *ModelPricing {
 	if pricing == nil || !isDeepSeekModel(model) {
 		return pricing
@@ -352,6 +359,9 @@ func applyDeepSeekOfficialPricing(model string, pricing *ModelPricing) *ModelPri
 		cloned.OutputPricePerToken = rate.OutputOffPeak
 		cloned.CacheReadPricePerToken = rate.InputCacheHitOffPeak
 		return &cloned
+	}
+	if deepSeekSiteCurrency() != deepSeekFallbackConstantsCurrency {
+		return pricing
 	}
 	if isDeepSeekProFamily(model) {
 		cloned.InputPricePerToken = deepseekProOffPeakInputPrice

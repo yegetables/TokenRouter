@@ -1079,24 +1079,35 @@ pricing:
   # 删除本地文件会在下次检查时移除其条目，文件存在但不是 JSON 时保留旧数据、下次检查再试。
   hash_check_interval_minutes: 10
   # ---------------------------------------------------------------------------
-  # DeepSeek 官方定价与峰谷时段自动同步
+  # DeepSeek 官方定价与峰谷时段自动同步（按币种）
   # ---------------------------------------------------------------------------
   # DeepSeek 官方未提供价格查询 API（/v1/models 仅返回模型名、/user/balance 仅余额），
   # 因此价格与峰谷时段从官方文档定价页自动解析并热更新，官方调价或峰谷时段调整
-  # 无需修改代码或升级镜像即可生效。解析失败时保留上一份成功快照，最终兜底为内置常量。
+  # 无需修改代码或升级镜像即可生效。解析失败时保留上一份成功快照（含磁盘载入的）。
   #
-  # 数据源 URL（默认官方中文定价页，人民币原生价格；改英文页则为美元计价）：
-  #   https://api-docs.deepseek.com/zh-cn/quick_start/pricing
-  # 若返回 JSON（未来官方若提供 API），可按以下结构解析：
+  # 币种：中文页以人民币计价、英文页以美元计价。快照按币种分别保存两套官方数字，
+  # 计费时取与站点展示币种（settings.balance_unit_name）一致的那一套：
+  #   CNY 站点 → 中文页人民币数字；USD 站点 → 英文页美元数字。
+  # 不做汇率换算，也不跨币种复用数字；某币种尚未同步成功时该币种不覆盖价卡
+  # （保持上游/本地目录价），站点切换币种后最多 60 秒内自动生效。
+  # 峰谷倍率与时段是比值与时刻，与币种无关，两套共用。
+  #
+  # 人民币（CNY）数据源，默认官方中文定价页：
+  # deepseek_pricing_url: "https://api-docs.deepseek.com/zh-cn/quick_start/pricing"
+  # 美元（USD）数据源，默认官方英文定价页：
+  # deepseek_pricing_url_usd: "https://api-docs.deepseek.com/quick_start/pricing"
+  #
+  # 若数据源返回 JSON（未来官方若提供 API），可按以下结构解析（币种取 currency 字段，
+  # 一个数据源一套币种；两页分别返回即可得到两套数字）：
   #   {"currency":"CNY","timezone":"Asia/Shanghai","weekdays_only":true,
   #    "peak_windows":[{"start":"09:00","end":"12:00"},{"start":"14:00","end":"18:00"}],
   #    "models":{"deepseek-flash":{"input_off_peak":1e-6,"input_cache_hit_off_peak":2e-8,
   #                                "output_off_peak":4e-6,"peak_multiplier":2}}}
   # 注意：数据源主机需在 security.url_allowlist.pricing_hosts 白名单内。
-  # deepseek_pricing_url: "https://api-docs.deepseek.com/zh-cn/quick_start/pricing"
   # 同步间隔（小时），默认 6
   deepseek_sync_interval_hours: 6
-  # 是否启用自动同步，默认启用（设为 false 则仅使用内置常量）
+  # 是否启用自动同步，默认启用（设为 false 则仅使用内置常量；内置常量为人民币口径，
+  # 站点币种不是 CNY 时不会套用）
   # deepseek_auto_sync: true
 
 # =============================================================================

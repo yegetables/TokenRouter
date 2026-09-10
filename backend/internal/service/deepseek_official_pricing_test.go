@@ -3,17 +3,33 @@
 package service
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
+	"sort"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/require"
 )
 
+// deepSeekSortedCurrencies 返回快照内币种的有序列表（断言用）。
+func deepSeekSortedCurrencies(snap *DeepSeekOfficialPricing) []string {
+	if snap == nil {
+		return nil
+	}
+	out := make([]string, 0, len(snap.Currencies))
+	for currency := range snap.Currencies {
+		out = append(out, currency)
+	}
+	sort.Strings(out)
+	return out
+}
+
 // 夹具来自官方文档定价页真实抓取内容（2026-09-10）：
-//   testdata/deepseek_pricing_zh.html → https://api-docs.deepseek.com/zh-cn/quick_start/pricing
-//   testdata/deepseek_pricing_en.html → https://api-docs.deepseek.com/quick_start/pricing
+//
+//	testdata/deepseek_pricing_zh.html → https://api-docs.deepseek.com/zh-cn/quick_start/pricing
+//	testdata/deepseek_pricing_en.html → https://api-docs.deepseek.com/quick_start/pricing
 func loadDeepSeekFixture(t *testing.T, name string) []byte {
 	t.Helper()
 	body, err := os.ReadFile(filepath.Join("testdata", name))
@@ -22,24 +38,55 @@ func loadDeepSeekFixture(t *testing.T, name string) []byte {
 	return body
 }
 
-func TestParseDeepSeekPricingHTML_ChinesePage(t *testing.T) {
-	body := loadDeepSeekFixture(t, "deepseek_pricing_zh.html")
+// useDeepSeekSiteCurrency 固定站点展示币种，并在用例结束后恢复默认（USD）。
+func useDeepSeekSiteCurrency(t *testing.T, currency string) {
+	t.Helper()
+	SetDeepSeekPricingCurrencyResolver(func() string { return currency })
+	t.Cleanup(func() {
+		SetDeepSeekPricingCurrencyResolver(func() string { return "" })
+	})
+}
 
-	snap, err := parseDeepSeekPricingHTML(body, defaultDeepSeekPricingURL)
+// parseDeepSeekFixtureSnapshot 解析夹具页并返回快照。
+func parseDeepSeekFixtureSnapshot(t *testing.T, fixture, src string) *DeepSeekOfficialPricing {
+	t.Helper()
+	snap, err := parseDeepSeekPricingHTML(loadDeepSeekFixture(t, fixture), src)
 	require.NoError(t, err)
-	require.Equal(t, "CNY", snap.Currency)
+	return snap
+}
+
+// dualCurrencySnapshot 合并中英文两页，得到 CNY + USD 双币种快照。
+func dualCurrencySnapshot(t *testing.T) *DeepSeekOfficialPricing {
+	t.Helper()
+	snap := parseDeepSeekFixtureSnapshot(t, "deepseek_pricing_zh.html", defaultDeepSeekPricingURL)
+	_, err := mergeDeepSeekSourceSnapshot(snap,
+		parseDeepSeekFixtureSnapshot(t, "deepseek_pricing_en.html", fallbackDeepSeekPricingURL), false)
+	require.NoError(t, err)
+	require.NoError(t, validateDeepSeekOfficialPricing(snap))
+	return snap
+}
+
+func TestParseDeepSeekPricingHTML_ChinesePage(t *testing.T) {
+	snap := parseDeepSeekFixtureSnapshot(t, "deepseek_pricing_zh.html", defaultDeepSeekPricingURL)
+
+	require.Equal(t, "CNY", snap.primaryCurrency())
 	require.Equal(t, "Asia/Shanghai", snap.Timezone)
 	require.True(t, snap.WeekdaysOnly)
 	require.NoError(t, validateDeepSeekOfficialPricing(snap))
 
+	rates, ok := snap.ratesFor("CNY")
+	require.True(t, ok)
+	require.Equal(t, "CNY", rates.Currency)
+	require.Equal(t, defaultDeepSeekPricingURL, rates.SourceURL)
+
 	// 中文页价格（元/百万 token）：flash 0.02/1/4，pro 0.15/4.5/13.5
-	flash := snap.Models["flash"]
+	flash := rates.Models["flash"]
 	require.InDelta(t, 2e-8, flash.InputCacheHitOffPeak, 1e-12) // ¥0.02/M
 	require.InDelta(t, 1e-6, flash.InputOffPeak, 1e-12)         // ¥1/M
 	require.InDelta(t, 4e-6, flash.OutputOffPeak, 1e-12)        // ¥4/M
 	require.InDelta(t, 2.0, flash.PeakMultiplier, 1e-9)
 
-	pro := snap.Models["pro"]
+	pro := rates.Models["pro"]
 	require.InDelta(t, 1.5e-7, pro.InputCacheHitOffPeak, 1e-12) // ¥0.15/M
 	require.InDelta(t, 4.5e-6, pro.InputOffPeak, 1e-12)         // ¥4.5/M
 	require.InDelta(t, 1.35e-5, pro.OutputOffPeak, 1e-12)       // ¥13.5/M
@@ -52,22 +99,24 @@ func TestParseDeepSeekPricingHTML_ChinesePage(t *testing.T) {
 }
 
 func TestParseDeepSeekPricingHTML_EnglishPage(t *testing.T) {
-	body := loadDeepSeekFixture(t, "deepseek_pricing_en.html")
+	snap := parseDeepSeekFixtureSnapshot(t, "deepseek_pricing_en.html", fallbackDeepSeekPricingURL)
 
-	snap, err := parseDeepSeekPricingHTML(body, fallbackDeepSeekPricingURL)
-	require.NoError(t, err)
-	require.Equal(t, "USD", snap.Currency)
+	require.Equal(t, "USD", snap.primaryCurrency())
 	require.Equal(t, "UTC", snap.Timezone)
 	require.True(t, snap.WeekdaysOnly)
 	require.NoError(t, validateDeepSeekOfficialPricing(snap))
 
 	// 英文页价格（美元/百万 token）：flash 0.003/0.15/0.6，pro 0.022/0.66/1.98
-	flash := snap.Models["flash"]
+	rates, ok := snap.ratesFor("USD")
+	require.True(t, ok)
+	require.Equal(t, "USD", rates.Currency)
+
+	flash := rates.Models["flash"]
 	require.InDelta(t, 3e-9, flash.InputCacheHitOffPeak, 1e-12)
 	require.InDelta(t, 1.5e-7, flash.InputOffPeak, 1e-12)
 	require.InDelta(t, 6e-7, flash.OutputOffPeak, 1e-12)
 
-	pro := snap.Models["pro"]
+	pro := rates.Models["pro"]
 	require.InDelta(t, 2.2e-8, pro.InputCacheHitOffPeak, 1e-12)
 	require.InDelta(t, 6.6e-7, pro.InputOffPeak, 1e-12)
 	require.InDelta(t, 1.98e-6, pro.OutputOffPeak, 1e-12)
@@ -82,14 +131,19 @@ func TestValidateDeepSeekOfficialPricing_RejectsInvalid(t *testing.T) {
 	valid := func() *DeepSeekOfficialPricing {
 		return &DeepSeekOfficialPricing{
 			FetchedAt:    time.Now(),
-			SourceURL:    "test",
-			Currency:     "CNY",
 			Timezone:     "Asia/Shanghai",
 			WeekdaysOnly: true,
 			PeakWindows:  []DeepSeekPeakWindow{{Start: "09:00", End: "12:00"}},
-			Models: map[string]DeepSeekModelRate{
-				"flash": {InputOffPeak: 1e-6, InputCacheHitOffPeak: 2e-8, OutputOffPeak: 4e-6, PeakMultiplier: 2},
-				"pro":   {InputOffPeak: 4.5e-6, InputCacheHitOffPeak: 1.5e-7, OutputOffPeak: 1.35e-5, PeakMultiplier: 2},
+			Currencies: map[string]DeepSeekCurrencyRates{
+				"CNY": {
+					Currency:  "CNY",
+					SourceURL: "test",
+					FetchedAt: time.Now(),
+					Models: map[string]DeepSeekModelRate{
+						"flash": {InputOffPeak: 1e-6, InputCacheHitOffPeak: 2e-8, OutputOffPeak: 4e-6, PeakMultiplier: 2},
+						"pro":   {InputOffPeak: 4.5e-6, InputCacheHitOffPeak: 1.5e-7, OutputOffPeak: 1.35e-5, PeakMultiplier: 2},
+					},
+				},
 			},
 		}
 	}
@@ -99,73 +153,119 @@ func TestValidateDeepSeekOfficialPricing_RejectsInvalid(t *testing.T) {
 		name   string
 		mutate func(*DeepSeekOfficialPricing)
 	}{
-		{"nil snapshot", func(*DeepSeekOfficialPricing) {}},
-		{"missing pro", func(s *DeepSeekOfficialPricing) { delete(s.Models, "pro") }},
+		{"missing pro", func(s *DeepSeekOfficialPricing) {
+			rates := s.Currencies["CNY"]
+			delete(rates.Models, "pro")
+			s.Currencies["CNY"] = rates
+		}},
 		{"zero input price", func(s *DeepSeekOfficialPricing) {
-			r := s.Models["flash"]
+			rates := s.Currencies["CNY"]
+			r := rates.Models["flash"]
 			r.InputOffPeak = 0
-			s.Models["flash"] = r
+			rates.Models["flash"] = r
+			s.Currencies["CNY"] = rates
 		}},
 		{"cache hit above miss", func(s *DeepSeekOfficialPricing) {
-			r := s.Models["flash"]
+			rates := s.Currencies["CNY"]
+			r := rates.Models["flash"]
 			r.InputCacheHitOffPeak = r.InputOffPeak * 2
-			s.Models["flash"] = r
+			rates.Models["flash"] = r
+			s.Currencies["CNY"] = rates
+		}},
+		{"currency key mismatch", func(s *DeepSeekOfficialPricing) {
+			rates := s.Currencies["CNY"]
+			rates.Currency = "USD"
+			s.Currencies["CNY"] = rates
 		}},
 		{"no peak windows", func(s *DeepSeekOfficialPricing) { s.PeakWindows = nil }},
 		{"bad window", func(s *DeepSeekOfficialPricing) {
 			s.PeakWindows = []DeepSeekPeakWindow{{Start: "12:00", End: "09:00"}}
 		}},
 		{"empty timezone", func(s *DeepSeekOfficialPricing) { s.Timezone = "" }},
-		{"empty currency", func(s *DeepSeekOfficialPricing) { s.Currency = "" }},
+		{"no currencies", func(s *DeepSeekOfficialPricing) { s.Currencies = nil }},
 		{"price out of range", func(s *DeepSeekOfficialPricing) {
-			r := s.Models["flash"]
+			rates := s.Currencies["CNY"]
+			r := rates.Models["flash"]
 			r.InputOffPeak = 1e-2 // ¥10000/M，远超合理区间
-			s.Models["flash"] = r
+			rates.Models["flash"] = r
+			s.Currencies["CNY"] = rates
 		}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if tt.name == "nil snapshot" {
-				require.Error(t, validateDeepSeekOfficialPricing(nil))
-				return
-			}
 			snap := valid()
 			tt.mutate(snap)
 			require.Error(t, validateDeepSeekOfficialPricing(snap))
 		})
 	}
+	require.Error(t, validateDeepSeekOfficialPricing(nil))
 }
 
 func TestSnapshotRoundTrip(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, deepSeekPricingFileName)
 
-	body := loadDeepSeekFixture(t, "deepseek_pricing_zh.html")
-	snap, err := parseDeepSeekPricingHTML(body, defaultDeepSeekPricingURL)
-	require.NoError(t, err)
-
+	snap := dualCurrencySnapshot(t)
 	require.NoError(t, saveDeepSeekPricingSnapshot(path, snap))
 
 	loaded := loadDeepSeekPricingSnapshot(path)
 	require.NotNil(t, loaded)
-	require.Equal(t, snap.Currency, loaded.Currency)
+	require.Equal(t, []string{"CNY", "USD"}, deepSeekSortedCurrencies(loaded))
 	require.Equal(t, snap.Timezone, loaded.Timezone)
 	require.Equal(t, snap.PeakWindows, loaded.PeakWindows)
-	require.InDelta(t, snap.Models["flash"].InputOffPeak, loaded.Models["flash"].InputOffPeak, 1e-15)
 	require.True(t, deepSeekPricingEqual(snap, loaded))
+
+	// 双币种各自的数字都保留，互不污染
+	cny, ok := loaded.ratesFor("CNY")
+	require.True(t, ok)
+	require.InDelta(t, 1e-6, cny.Models["flash"].InputOffPeak, 1e-15)
+	usd, ok := loaded.ratesFor("USD")
+	require.True(t, ok)
+	require.InDelta(t, 1.5e-7, usd.Models["flash"].InputOffPeak, 1e-15)
 }
 
-// 同步快照存在时，计费覆盖与峰谷倍率都应使用快照（人民币原生价）。
+// v1 单币种快照文件（旧版本落盘）应能迁移为多币种结构后载入。
+func TestLoadDeepSeekPricingSnapshot_MigratesLegacyV1(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, deepSeekPricingFileName)
+
+	legacy := map[string]any{
+		"fetched_at":    time.Now().Format(time.RFC3339Nano),
+		"source_url":    defaultDeepSeekPricingURL,
+		"currency":      "CNY",
+		"timezone":      "Asia/Shanghai",
+		"weekdays_only": true,
+		"peak_windows":  []map[string]string{{"start": "09:00", "end": "12:00"}},
+		"models": map[string]any{
+			"flash": map[string]any{"input_off_peak": 1e-6, "input_cache_hit_off_peak": 2e-8, "output_off_peak": 4e-6, "peak_multiplier": 2},
+			"pro":   map[string]any{"input_off_peak": 4.5e-6, "input_cache_hit_off_peak": 1.5e-7, "output_off_peak": 1.35e-5, "peak_multiplier": 2},
+		},
+	}
+	body, err := json.MarshalIndent(legacy, "", "  ")
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(path, body, 0o644))
+
+	loaded := loadDeepSeekPricingSnapshot(path)
+	require.NotNil(t, loaded)
+	require.Equal(t, []string{"CNY"}, deepSeekSortedCurrencies(loaded))
+	cny, ok := loaded.ratesFor("CNY")
+	require.True(t, ok)
+	require.InDelta(t, 1e-6, cny.Models["flash"].InputOffPeak, 1e-15)
+	// 兼容字段已清空，避免与新结构重复
+	require.Empty(t, loaded.Currency)
+	require.Empty(t, loaded.Models)
+}
+
+// 同步快照存在时，计费覆盖与峰谷倍率都应使用「站点币种对应」的那一套数字。
 func TestApplyDeepSeekPricing_UsesSyncedSnapshot(t *testing.T) {
 	restore := deepSeekOfficial.Load()
 	t.Cleanup(func() { deepSeekOfficial.Store(restore) })
+	useDeepSeekSiteCurrency(t, "CNY")
 
-	body := loadDeepSeekFixture(t, "deepseek_pricing_zh.html")
-	snap, err := parseDeepSeekPricingHTML(body, defaultDeepSeekPricingURL)
-	require.NoError(t, err)
+	snap := parseDeepSeekFixtureSnapshot(t, "deepseek_pricing_zh.html", defaultDeepSeekPricingURL)
 	deepSeekOfficial.Store(snap)
 
-	// 谷价覆盖：flash 使用快照值 ¥1/M（而非兜底常量 $0.22/M）
+	// 谷价覆盖：flash 使用快照值 ¥1/M（而非兜底常量 ¥0.22/M）
 	pricing := &ModelPricing{InputPricePerToken: 1, OutputPricePerToken: 1, CacheReadPricePerToken: 1}
 	overridden := applyDeepSeekOfficialPricing("deepseek-flash", pricing)
 	require.InDelta(t, 1e-6, overridden.InputPricePerToken, 1e-15)
@@ -192,13 +292,60 @@ func TestApplyDeepSeekPricing_UsesSyncedSnapshot(t *testing.T) {
 	require.InDelta(t, 1e-6, weekend.InputPricePerToken, 1e-15)
 }
 
-// 无快照时回退内置常量与内置峰谷规则，保证既有行为不回归。
+// 站点币种决定取哪一套官方数字：同一份双币种快照下，USD 站点用美元页、CNY 站点用人民币页。
+func TestApplyDeepSeekPricing_SelectsCurrencyBySiteSetting(t *testing.T) {
+	restore := deepSeekOfficial.Load()
+	t.Cleanup(func() { deepSeekOfficial.Store(restore) })
+
+	deepSeekOfficial.Store(dualCurrencySnapshot(t))
+
+	pricing := &ModelPricing{InputPricePerToken: 1, OutputPricePerToken: 1, CacheReadPricePerToken: 1}
+
+	useDeepSeekSiteCurrency(t, "CNY")
+	cny := applyDeepSeekOfficialPricing("deepseek-flash", pricing)
+	require.InDelta(t, 1e-6, cny.InputPricePerToken, 1e-15) // ¥1/M
+	require.InDelta(t, 4e-6, cny.OutputPricePerToken, 1e-15)
+
+	useDeepSeekSiteCurrency(t, "USD")
+	usd := applyDeepSeekOfficialPricing("deepseek-flash", pricing)
+	require.InDelta(t, 1.5e-7, usd.InputPricePerToken, 1e-15) // $0.15/M
+	require.InDelta(t, 6e-7, usd.OutputPricePerToken, 1e-15)
+
+	usdPro := applyDeepSeekOfficialPricing("deepseek-v4-pro", pricing)
+	require.InDelta(t, 6.6e-7, usdPro.InputPricePerToken, 1e-15) // $0.66/M
+}
+
+// 站点为 USD 但只有人民币快照时：既不换算，也不套用人民币常量，保持上游价卡数字。
+func TestApplyDeepSeekPricing_USDSiteWithoutUSDRatesKeepsUpstreamCard(t *testing.T) {
+	restore := deepSeekOfficial.Load()
+	t.Cleanup(func() { deepSeekOfficial.Store(restore) })
+
+	deepSeekOfficial.Store(parseDeepSeekFixtureSnapshot(t, "deepseek_pricing_zh.html", defaultDeepSeekPricingURL))
+	useDeepSeekSiteCurrency(t, "USD")
+
+	pricing := &ModelPricing{InputPricePerToken: 0.15e-6, OutputPricePerToken: 0.6e-6, CacheReadPricePerToken: 0.003e-6}
+	got := applyDeepSeekOfficialPricing("deepseek-flash", pricing)
+	require.InDelta(t, 0.15e-6, got.InputPricePerToken, 1e-18) // 未被人民币数字覆盖
+	require.InDelta(t, 0.6e-6, got.OutputPricePerToken, 1e-18)
+
+	// 同一快照在 CNY 站点则正常接管
+	useDeepSeekSiteCurrency(t, "CNY")
+	gotCNY := applyDeepSeekOfficialPricing("deepseek-flash", pricing)
+	require.InDelta(t, 1e-6, gotCNY.InputPricePerToken, 1e-15)
+}
+
+// 无快照时：CNY 站点回退内置常量与内置峰谷规则；USD 站点不动上游价卡。
 func TestApplyDeepSeekPricing_FallbackWhenNoSnapshot(t *testing.T) {
 	restore := deepSeekOfficial.Load()
 	t.Cleanup(func() { deepSeekOfficial.Store(restore) })
 	deepSeekOfficial.Store(nil)
 
 	pricing := &ModelPricing{InputPricePerToken: 1, OutputPricePerToken: 1, CacheReadPricePerToken: 1}
+
+	useDeepSeekSiteCurrency(t, "USD")
+	require.InDelta(t, 1.0, applyDeepSeekOfficialPricing("deepseek-flash", pricing).InputPricePerToken, 1e-15)
+
+	useDeepSeekSiteCurrency(t, "CNY")
 	flash := applyDeepSeekOfficialPricing("deepseek-flash", pricing)
 	require.InDelta(t, deepseekFlashOffPeakInputPrice, flash.InputPricePerToken, 1e-18)
 	pro := applyDeepSeekOfficialPricing("deepseek-v4-pro", pricing)
@@ -232,10 +379,67 @@ func TestParseDeepSeekPricingJSONPayload(t *testing.T) {
 	}`)
 	snap, err := parseDeepSeekPricingJSON(body, "https://example.com/pricing.json")
 	require.NoError(t, err)
-	require.Equal(t, "CNY", snap.Currency)
+	require.Equal(t, "CNY", snap.primaryCurrency())
 	require.NoError(t, validateDeepSeekOfficialPricing(snap))
-	require.InDelta(t, 1e-6, snap.Models["flash"].InputOffPeak, 1e-15)
-	require.InDelta(t, 4.5e-6, snap.Models["pro"].InputOffPeak, 1e-15)
+
+	rates, ok := snap.ratesFor("CNY")
+	require.True(t, ok)
+	require.InDelta(t, 1e-6, rates.Models["flash"].InputOffPeak, 1e-15)
+	require.InDelta(t, 4.5e-6, rates.Models["pro"].InputOffPeak, 1e-15)
+}
+
+// 单源失败或校验不通过时，只保留其它币种的上一份好数据，窗口不被覆盖。
+func TestMergeDeepSeekSourceSnapshot_KeepsOtherCurrencyOnFailure(t *testing.T) {
+	dst := newDeepSeekPricingSnapshot()
+
+	cnySource := parseDeepSeekFixtureSnapshot(t, "deepseek_pricing_zh.html", defaultDeepSeekPricingURL)
+	usdSource := parseDeepSeekFixtureSnapshot(t, "deepseek_pricing_en.html", fallbackDeepSeekPricingURL)
+
+	// 第一轮：只抓到人民币页 → CNY + 北京时间峰谷窗口
+	currency, err := mergeDeepSeekSourceSnapshot(dst, cnySource, true)
+	require.NoError(t, err)
+	require.Equal(t, "CNY", currency)
+	require.Equal(t, "Asia/Shanghai", dst.Timezone)
+
+	// 第二轮：只抓到美元页 → USD 并入，峰谷窗口保持不覆盖（时间表示等价，避免来回翻转）
+	currency, err = mergeDeepSeekSourceSnapshot(dst, usdSource, false)
+	require.NoError(t, err)
+	require.Equal(t, "USD", currency)
+	require.Equal(t, []string{"CNY", "USD"}, deepSeekSortedCurrencies(dst))
+	require.Equal(t, "Asia/Shanghai", dst.Timezone)
+	require.NoError(t, validateDeepSeekOfficialPricing(dst))
+
+	// 坏源：币种键与字段不一致 → 报错且不修改目标
+	bad := newDeepSeekPricingSnapshot()
+	bad.Currencies["USD"] = DeepSeekCurrencyRates{
+		Currency: "CNY",
+		Models:   usdSource.Currencies["USD"].Models,
+	}
+	_, err = mergeDeepSeekSourceSnapshot(dst, bad, true)
+	require.Error(t, err)
+	require.Equal(t, []string{"CNY", "USD"}, deepSeekSortedCurrencies(dst))
+	require.Equal(t, "Asia/Shanghai", dst.Timezone)
+
+	// 空源：无币种 → 报错
+	_, err = mergeDeepSeekSourceSnapshot(dst, newDeepSeekPricingSnapshot(), true)
+	require.Error(t, err)
+}
+
+func TestDeepSeekSiteCurrency_ResolverAndCache(t *testing.T) {
+	SetDeepSeekPricingCurrencyResolver(func() string { return "  cny " })
+	t.Cleanup(func() { SetDeepSeekPricingCurrencyResolver(func() string { return "" }) })
+
+	require.Equal(t, "CNY", deepSeekSiteCurrency())
+
+	// 缓存命中：切换 resolver 但不失效缓存时仍返回旧值，失效后立即收敛
+	deepSeekCurrencyResolver.Store(func() string { return "usd" })
+	require.Equal(t, "CNY", deepSeekSiteCurrency())
+	InvalidateDeepSeekPricingCurrencyCache()
+	require.Equal(t, "USD", deepSeekSiteCurrency())
+
+	// 读取器返回空 → 回退默认 USD
+	SetDeepSeekPricingCurrencyResolver(func() string { return "" })
+	require.Equal(t, "USD", deepSeekSiteCurrency())
 }
 
 func TestNormalizeDeepSeekFamily(t *testing.T) {
