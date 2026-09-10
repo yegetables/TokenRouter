@@ -94,6 +94,7 @@ import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import Icon from '@/components/icons/Icon.vue'
 import { useBalanceDisplay } from '@/composables/useBalanceDisplay'
+import { formatPriceNumber } from '@/utils/priceFormat'
 import type { MarketplaceModel, MarketplaceModelPricing, MarketplacePricingInterval } from '@/types'
 
 // 抽屉式完整定价面板：原地展开收起、上下文区间与 fast mode 切换都收敛在卡片内部。
@@ -123,16 +124,6 @@ function hasPositiveValue(value?: number | null): value is number {
 
 // —— 价格格式化：与模型广场卡片预览保持同一口径 ——
 
-function formatPriceNumber(value: number): string {
-  const abs = Math.abs(value)
-  const maximumFractionDigits = abs >= 1 ? 2 : abs >= 0.01 ? 4 : 6
-  const minimumFractionDigits = abs >= 1 ? 2 : 4
-
-  return new Intl.NumberFormat(undefined, {
-    minimumFractionDigits,
-    maximumFractionDigits,
-  }).format(value)
-}
 
 function formatPrice(value: number): string {
   return `${formatPriceNumber(value)} ${balanceUnitName.value}`

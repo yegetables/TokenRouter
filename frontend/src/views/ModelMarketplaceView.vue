@@ -338,6 +338,7 @@ import { initTheme, useTheme } from '@/composables/useTheme'
 import { getMarketplaceModels } from '@/api/marketplace'
 import { providerBrandDisplayName, providerBrandFilterKey, resolveProviderBrand, resolveProviderBrandKey } from '@/utils/providerBrand'
 import { sanitizeUrl } from '@/utils/url'
+import { formatPriceNumber } from '@/utils/priceFormat'
 import type { MarketplaceGroup, MarketplaceModelPricing, MarketplacePricingInterval } from '@/types'
 import { useAppStore, useAuthStore } from '@/stores'
 
@@ -561,16 +562,6 @@ function formatPrice(value: number): string {
   return `${formatPriceNumber(value)} ${balanceUnitName.value}`
 }
 
-function formatPriceNumber(value: number): string {
-  const abs = Math.abs(value)
-  const maximumFractionDigits = abs >= 1 ? 2 : abs >= 0.01 ? 4 : 6
-  const minimumFractionDigits = abs >= 1 ? 2 : 4
-
-  return new Intl.NumberFormat(undefined, {
-    minimumFractionDigits,
-    maximumFractionDigits,
-  }).format(value)
-}
 
 function formatPerMillion(value: number): string {
   return `${formatPrice(value * 1_000_000)} ${t('usage.perMillionTokens')}`
