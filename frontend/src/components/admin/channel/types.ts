@@ -185,14 +185,18 @@ export function isValidPositiveMultiplier(val: number | string | null | undefine
 /** 前端显示值($/MTok) → 后端存储值(per-token) */
 export function mTokToPerToken(val: number | string | null | undefined): number | null {
   const num = toNullableNumber(val)
-  return num === null ? null : parseFloat((num / MTOK).toPrecision(10))
+  // toPrecision(15) 逼近 double 精度上限：仅抹掉末位浮点噪声，不损失真实有效数字。
+  // （原为 10 位有效数字，会把按汇率折算出来的价格在保存时改写，
+  //   如 0.277777777777778 → 0.2777777778。）
+  return num === null ? null : parseFloat((num / MTOK).toPrecision(15))
 }
 
 /** 后端存储值(per-token) → 前端显示值($/MTok) */
 export function perTokenToMTok(val: number | null | undefined): number | null {
   if (val === null || val === undefined) return null
-  // toPrecision(10) 消除 IEEE 754 浮点乘法精度误差，如 5e-8 * 1e6 = 0.04999...96 → 0.05
-  return parseFloat((val * MTOK).toPrecision(10))
+  // toPrecision(15) 消除 IEEE 754 浮点乘法精度误差（如 5e-8 * 1e6 = 0.04999...96 → 0.05），
+  // 同时保留 double 能表示的有效数字，避免展示/保存往返把价格改写。
+  return parseFloat((val * MTOK).toPrecision(15))
 }
 
 function hasConfiguredPrice(val: number | string | null | undefined): boolean {
