@@ -2933,7 +2933,13 @@ func (h *AccountHandler) SyncUpstreamModels(c *gin.Context) {
 		return
 	}
 
-	models, err := h.accountTestService.FetchUpstreamSupportedModels(c.Request.Context(), account)
+	models, metadata, err := h.accountTestService.FetchUpstreamModelCatalog(c.Request.Context(), account)
+	var catalogErr *service.UpstreamModelSyncError
+	if err != nil && errors.As(err, &catalogErr) && catalogErr.Kind == service.UpstreamModelSyncErrorUnsupported {
+		// 非 OpenAI 兼容 API Key 账号：沿用只同步模型 ID 的旧路径。
+		models, err = h.accountTestService.FetchUpstreamSupportedModels(c.Request.Context(), account)
+		metadata = nil
+	}
 	if err != nil {
 		var syncErr *service.UpstreamModelSyncError
 		if errors.As(err, &syncErr) {
@@ -2950,6 +2956,14 @@ func (h *AccountHandler) SyncUpstreamModels(c *gin.Context) {
 		slog.Warn("sync_upstream_models_failed", "account_id", accountID)
 		response.Error(c, http.StatusBadGateway, "Failed to sync upstream models from upstream")
 		return
+	}
+
+	// 持久化上游声明的上下文与能力快照（仅 OpenAI 兼容账号会有数据）。
+	if len(metadata) > 0 {
+		snapshot := service.NewUpstreamModelMetadataSnapshot("upstream", metadata)
+		if persistErr := h.adminService.UpdateAccountExtra(c.Request.Context(), accountID, map[string]any{service.UpstreamModelMetadataExtraKey: snapshot}); persistErr != nil {
+			slog.Warn("sync_upstream_models_metadata_persist_failed", "account_id", accountID, "error", persistErr)
+		}
 	}
 
 	response.Success(c, gin.H{"models": models})

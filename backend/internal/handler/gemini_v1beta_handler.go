@@ -44,7 +44,7 @@ func (h *GatewayHandler) GeminiV1BetaListModels(c *gin.Context) {
 		if forcePlatform, ok := middleware.GetForcePlatformFromContext(c); ok && forcePlatform == service.PlatformAntigravity {
 			requiredPlatform = service.PlatformAntigravity
 		}
-		models := h.compositeRequestableModels(c, apiKey, requiredPlatform)
+		models, _ := h.compositeRequestableModels(c, apiKey, requiredPlatform)
 		out := make([]gemini.Model, 0, len(models))
 		for _, model := range models {
 			out = append(out, gemini.Model{
