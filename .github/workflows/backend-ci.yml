@@ -1,7 +1,12 @@
 name: CI
 
 on:
+  # 构建分支约定：tag 推送只触发打包（release.yml），不再重复跑云端测试。
   push:
+    branches:
+      - '**'
+    tags-ignore:
+      - '**'
   pull_request:
 
 permissions:
