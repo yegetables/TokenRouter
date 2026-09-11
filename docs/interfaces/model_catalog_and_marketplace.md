@@ -24,7 +24,7 @@
 
 账号级「同步上游模型」对 OpenAI 兼容 API Key 账号（openai 与 kimi/zhipu/deepseek）请求上游 `/v1/models`，把声明的上下文与能力写入账号快照 `account.extra.upstream_model_metadata`；其它平台账号不写快照。快照只读、不参与计费，字段与 sub2api 对齐：canonical 为 `context_window`、`max_output_tokens`、`input_modalities`、`reasoning`、`supported_reasoning_levels`，扩展能力为 `supports_tools`/`supports_vision`/`supports_anthropic`/`supports_responses`、`responses_modes`、`responses_capabilities`。上游未声明的字段一律省略，不推断、不补；显式 `supports_vision` 预映射 `input_modalities`（`true` → `["text","image"]`，`false` → `["text"]`）。**所有价格字段都不进入快照**。
 
-`GET /v1/models` 的每条模型命中分组内账号快照时，附加 `context_length` 与别名 `context_window`、`max_completion_tokens` 与别名 `max_output_tokens`、`supports_tools`/`supports_reasoning`/`supports_vision`/`supports_anthropic`/`supports_responses`、`responses_modes`、`responses_capabilities`、`input_modalities`；未命中或未声明时不输出，保持历史响应结构。该透传无账号/分组开关，只读本地快照、不发起上游请求，Anthropic/Gemini 等无快照分组不会多出这些字段。
+`GET /v1/models` 的每条模型命中分组内账号快照时，附加 `context_length` 与别名 `context_window`、`max_completion_tokens` 与别名 `max_output_tokens`、`supports_tools`/`supports_reasoning`/`supports_vision`/`supports_anthropic`/`supports_responses`、`responses_modes`、`responses_capabilities`、`input_modalities`；未命中或未声明时不输出，保持历史响应结构。该透传无账号/分组开关，只读本地快照、不发起上游请求，Anthropic/Gemini 等无快照分组不会多出这些字段。DeepSeek 平台例外：无账号快照时回退到内置模板（`deepseek-flash`、`deepseek-v4-pro` 及旧名 `deepseek-v4-flash`/`deepseek-v4-flash-vision-exp`；上下文 `1048576`、最大输出 `393216`、reasoning/tools/anthropic/responses，Flash 系列含 vision），账号快照命中时以快照为准。
 
 ## 市场可见性
 

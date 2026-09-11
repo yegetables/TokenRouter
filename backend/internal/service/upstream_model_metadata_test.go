@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"encoding/json"
 	"testing"
 
@@ -119,4 +120,38 @@ func TestAccountUpstreamModelMetadataSnapshotRoundTrip(t *testing.T) {
 	metadata, ok = account.GetUpstreamModelMetadata("GLM-5.2")
 	require.True(t, ok)
 	require.Equal(t, int64(7), metadata.ContextWindow)
+}
+
+// DeepSeek 平台内置模板：无账号快照时也应提供上下文与能力。
+func TestBuiltinUpstreamModelMetadataDeepseek(t *testing.T) {
+	metadata := BuiltinUpstreamModelMetadata(PlatformDeepseek)
+	require.NotEmpty(t, metadata)
+
+	flash := metadata["deepseek-flash"]
+	require.Equal(t, int64(1048576), flash.ContextWindow)
+	require.Equal(t, int64(393216), flash.MaxOutputTokens)
+	require.NotNil(t, flash.Reasoning)
+	require.True(t, *flash.Reasoning)
+	require.True(t, *flash.SupportsTools)
+	require.True(t, *flash.SupportsVision)
+	require.Equal(t, []string{"text", "image"}, flash.InputModalities)
+
+	pro := metadata["deepseek-v4-pro"]
+	require.False(t, *pro.SupportsVision)
+	require.Equal(t, []string{"text"}, pro.InputModalities)
+
+	// 其它平台没有内置模板，避免误给无关平台补字段。
+	require.Nil(t, BuiltinUpstreamModelMetadata(PlatformOpenAI))
+	require.Nil(t, BuiltinUpstreamModelMetadata(PlatformKimi))
+}
+
+// 无分组/无账号快照时，解析结果回退到平台内置模板。
+func TestResolveUpstreamModelMetadataFallsBackToBuiltin(t *testing.T) {
+	svc := &GatewayService{}
+	metadata := svc.ResolveUpstreamModelMetadata(context.Background(), nil, PlatformDeepseek)
+	require.Equal(t, int64(1048576), metadata["deepseek-flash"].ContextWindow)
+	require.Equal(t, int64(393216), metadata["deepseek-v4-pro"].MaxOutputTokens)
+
+	// 非 DeepSeek 平台仍返回 nil，保持既有行为。
+	require.Nil(t, svc.ResolveUpstreamModelMetadata(context.Background(), nil, PlatformOpenAI))
 }

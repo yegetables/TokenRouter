@@ -236,6 +236,41 @@ func upstreamModelMetadataIsUseful(metadata UpstreamModelMetadata) bool {
 		len(metadata.ResponsesCapabilities) > 0
 }
 
+// BuiltinUpstreamModelMetadata 返回平台内置的模型上下文与能力模板，作为账号快照
+// 缺失时的兜底，让 /v1/models 也能返回上下文/能力。目前仅覆盖 DeepSeek 官方模型，
+// 数据来源：https://api-docs.deepseek.com/quick_start/pricing（上下文 1M、最大输出 384K）。
+func BuiltinUpstreamModelMetadata(platform string) map[string]UpstreamModelMetadata {
+	if platform != PlatformDeepseek {
+		return nil
+	}
+	ptr := func(value bool) *bool { return &value }
+	entry := func(id string, vision bool) UpstreamModelMetadata {
+		metadata := UpstreamModelMetadata{
+			ID:                id,
+			Reasoning:         ptr(true),
+			ContextWindow:     1048576,
+			MaxOutputTokens:   393216,
+			SupportsTools:     ptr(true),
+			SupportsVision:    ptr(vision),
+			SupportsAnthropic: ptr(true),
+			SupportsResponses: ptr(true),
+		}
+		if vision {
+			metadata.InputModalities = []string{"text", "image"}
+		} else {
+			metadata.InputModalities = []string{"text"}
+		}
+		return metadata
+	}
+	// 旧名 deepseek-v4-flash / deepseek-v4-flash-vision-exp 仍由 V4.1 Flash 提供服务。
+	return map[string]UpstreamModelMetadata{
+		"deepseek-flash":               entry("deepseek-flash", true),
+		"deepseek-v4-flash":            entry("deepseek-v4-flash", true),
+		"deepseek-v4-flash-vision-exp": entry("deepseek-v4-flash-vision-exp", true),
+		"deepseek-v4-pro":              entry("deepseek-v4-pro", false),
+	}
+}
+
 // NewUpstreamModelMetadataSnapshot 构造快照，键统一小写归一。
 func NewUpstreamModelMetadataSnapshot(source string, models map[string]UpstreamModelMetadata) UpstreamModelMetadataSnapshot {
 	normalized := make(map[string]UpstreamModelMetadata, len(models))
