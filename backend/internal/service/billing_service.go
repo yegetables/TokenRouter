@@ -2062,11 +2062,8 @@ func modelDisplayTimePricing(resolved *ResolvedPricing, at time.Time) *ModelDisp
 	}
 	periods := make([]ModelDisplayTimePeriod, 0, len(config.Periods))
 	for _, period := range config.Periods {
-		periods = append(periods, ModelDisplayTimePeriod{
-			StartTime:  period.StartTime,
-			EndTime:    period.EndTime,
-			Multiplier: period.Multiplier,
-		})
+		// 字段完全一致，直接类型转换，避免 staticcheck S1016。
+		periods = append(periods, ModelDisplayTimePeriod(period))
 	}
 	return &ModelDisplayTimePricing{
 		Timezone:         config.Timezone,
