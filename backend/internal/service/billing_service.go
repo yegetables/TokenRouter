@@ -308,9 +308,9 @@ var ErrModelPricingUnavailable = errors.New("pricing not found")
 // DeepSeek 官方价卡以美元/token 表示；峰值时段为工作日 UTC 01:00–04:00
 // 与 06:00–10:00，峰值价格是低谷价格的 2 倍。
 const (
-	deepseekFlashOffPeakInputPrice  = 2.2e-7
-	deepseekFlashOffPeakOutputPrice = 6.6e-7
-	deepseekFlashOffPeakCacheRead   = 7e-9
+	deepseekFlashOffPeakInputPrice  = 1.5e-7
+	deepseekFlashOffPeakOutputPrice = 6.0e-7
+	deepseekFlashOffPeakCacheRead   = 3.0e-9
 	deepseekProOffPeakInputPrice    = 6.6e-7
 	deepseekProOffPeakOutputPrice   = 1.98e-6
 	deepseekProOffPeakCacheRead     = 2.2e-8
@@ -660,6 +660,13 @@ func (s *BillingService) initFallbackPricing() {
 		CacheReadPricePerToken: deepseekFlashOffPeakCacheRead,
 		SupportsCacheBreakdown: false,
 	}
+	// deepseek-flash 是官方当前模型名（V4.1 Flash）；与旧名 deepseek-v4-flash 同价。
+	s.fallbackPrices["deepseek-flash"] = &ModelPricing{
+		InputPricePerToken:     deepseekFlashOffPeakInputPrice,
+		OutputPricePerToken:    deepseekFlashOffPeakOutputPrice,
+		CacheReadPricePerToken: deepseekFlashOffPeakCacheRead,
+		SupportsCacheBreakdown: false,
+	}
 
 	// ---- 智谱 GLM（Z.AI）----
 	// 资料来源：https://docs.z.ai/guides/overview/pricing（美元/百万 token）
@@ -981,6 +988,10 @@ func (s *BillingService) getFallbackPricing(model string) *ModelPricing {
 	}
 	if strings.Contains(modelLower, "deepseek-v4-pro") {
 		return s.fallbackPrices["deepseek-v4-pro"]
+	}
+	// 官方当前模型名 deepseek-flash（V4.1 Flash）与旧名同价卡。
+	if strings.Contains(modelLower, "deepseek-flash") {
+		return s.fallbackPrices["deepseek-flash"]
 	}
 	if strings.HasPrefix(modelLower, "deepseek-") {
 		return s.fallbackPrices["deepseek-v4-flash"]
