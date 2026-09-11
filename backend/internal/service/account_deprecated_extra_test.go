@@ -205,3 +205,30 @@ func TestAdminServiceBulkUpdateAccountsIgnoresDeprecatedLongContextBillingExtra(
 	require.Equal(t, 1, repo.bulkUpdateCalls)
 	require.Equal(t, map[string]any{"preserved": true}, repo.lastBulkExtraUpdate)
 }
+
+// 账号保存会整份替换 extra；同步写入的上游模型元数据快照必须作为服务托管字段保留。
+func TestAdminServiceUpdateAccountPreservesUpstreamModelMetadataSnapshot(t *testing.T) {
+	repo := &deprecatedAccountExtraRepoStub{account: &Account{
+		ID:       1,
+		Platform: PlatformOpenAI,
+		Type:     AccountTypeAPIKey,
+		Extra: map[string]any{
+			UpstreamModelMetadataExtraKey: NewUpstreamModelMetadataSnapshot("upstream", map[string]UpstreamModelMetadata{
+				"deepseek-flash": {ID: "deepseek-flash", ContextWindow: 1000000},
+			}),
+			"privacy_mode": "limited",
+		},
+	}}
+	svc := &adminServiceImpl{accountRepo: repo}
+
+	// 模拟旧版/普通编辑器保存：提交的 extra 未携带同步快照。
+	account, err := svc.UpdateAccount(context.Background(), 1, &UpdateAccountInput{Extra: map[string]any{
+		"privacy_mode": "blocked",
+	}})
+
+	require.NoError(t, err)
+	require.Equal(t, "blocked", account.Extra["privacy_mode"])
+	snapshot, ok := account.Extra[UpstreamModelMetadataExtraKey].(UpstreamModelMetadataSnapshot)
+	require.True(t, ok, "同步快照必须保留")
+	require.Contains(t, snapshot.Models, "deepseek-flash")
+}
