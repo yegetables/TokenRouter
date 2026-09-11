@@ -1,7 +1,12 @@
 name: Security Scan
 
 on:
+  # 构建约定：tag 推送只触发打包（release.yml），安全扫描不随 tag 触发。
   push:
+    branches:
+      - '**'
+    tags-ignore:
+      - '**'
   pull_request:
   schedule:
     - cron: '0 3 * * 1'
