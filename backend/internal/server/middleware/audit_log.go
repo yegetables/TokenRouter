@@ -80,6 +80,7 @@ var auditActionOverrides = map[string]string{
 	"POST /api/v1/admin/settings/admin-api-key/regenerate":   "admin.admin_api_key.regenerate",
 	"DELETE /api/v1/admin/settings/admin-api-key":            "admin.admin_api_key.delete",
 	"POST /api/v1/subscriptions/:id/revoke":                  service.AuditActionUserSubscriptionRevoke,
+	"POST /api/v1/keys/:id/rotate":                           "user.api_key.rotate",
 }
 
 // auditBodyOmittedRoutes 请求体几乎整体由凭证构成的路由（如整块粘贴 auth JSON 的导入接口）。

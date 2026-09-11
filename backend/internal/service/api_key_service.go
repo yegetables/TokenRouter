@@ -29,6 +29,7 @@ var (
 	ErrGroupNotAllowed                   = infraerrors.Forbidden("GROUP_NOT_ALLOWED", "user is not allowed to bind this group")
 	ErrGroupDisabledForUser              = infraerrors.Forbidden("GROUP_DISABLED_FOR_USER", "user is not allowed to use this public group")
 	ErrAPIKeyExists                      = infraerrors.Conflict("API_KEY_EXISTS", "api key already exists")
+	ErrAPIKeyRotateConflict              = infraerrors.Conflict("API_KEY_ROTATE_CONFLICT", "api key was rotated by another request")
 	ErrAPIKeyLimitReached                = infraerrors.Conflict("API_KEY_LIMIT_REACHED", "api key limit reached")
 	ErrAPIKeyTooShort                    = infraerrors.BadRequest("API_KEY_TOO_SHORT", "api key must be at least 16 characters")
 	ErrAPIKeyInvalidChars                = infraerrors.BadRequest("API_KEY_INVALID_CHARS", "api key can only contain letters, numbers, underscores, and hyphens")
@@ -161,6 +162,14 @@ type APIKeyRepository interface {
 	IncrementRateLimitUsage(ctx context.Context, id int64, cost float64) error
 	ResetRateLimitWindows(ctx context.Context, id int64) error
 	GetRateLimitData(ctx context.Context, id int64) (*APIKeyRateLimitData, error)
+}
+
+// APIKeyCredentialRepository 提供凭据原地轮换所需的原子 CAS 更新。
+// 独立成窄接口，避免所有 APIKeyRepository 测试桩被迫实现轮换方法。
+type APIKeyCredentialRepository interface {
+	// RotateKey 仅在库中 key 仍等于 expectedKey 时替换为 newKey。
+	// 记录不存在返回 ErrAPIKeyNotFound；并发轮换失败返回 ErrAPIKeyRotateConflict。
+	RotateKey(ctx context.Context, id int64, expectedKey, newKey string) error
 }
 
 type apiKeyAllByUserIDLister interface {
@@ -1022,6 +1031,44 @@ func (s *APIKeyService) GetByID(ctx context.Context, id int64) (*APIKey, error) 
 	if apiKey != nil {
 		apiKey.CurrentConcurrency = s.currentConcurrencyForAPIKey(ctx, apiKey.ID)
 	}
+	return apiKey, nil
+}
+
+// Rotate 原地替换 API Key 的凭据值，保留 ID、配置与全部用量/计费历史。
+// 仅所有者本人可调用；服务端托管 Key（如创作台隐藏 Key）不可轮换。
+func (s *APIKeyService) Rotate(ctx context.Context, id, userID int64) (*APIKey, error) {
+	apiKey, err := s.apiKeyRepo.GetByID(ctx, id)
+	if err != nil {
+		return nil, fmt.Errorf("get api key: %w", err)
+	}
+	if apiKey != nil && apiKey.ManagedBy != nil {
+		// 与 GetByID/Update 保持一致，不暴露托管 Key 的存在性。
+		return nil, fmt.Errorf("get api key: %w", ErrAPIKeyNotFound)
+	}
+	if apiKey == nil || apiKey.UserID != userID {
+		return nil, ErrInsufficientPerms
+	}
+
+	repo, ok := s.apiKeyRepo.(APIKeyCredentialRepository)
+	if !ok {
+		return nil, infraerrors.InternalServer("API_KEY_ROTATION_UNAVAILABLE", "api key repository does not support atomic rotation")
+	}
+
+	oldKey := apiKey.Key
+	newKey, err := s.GenerateKey()
+	if err != nil {
+		return nil, fmt.Errorf("generate key: %w", err)
+	}
+	// 依赖 key 列唯一约束兜底碰撞：32 字节随机碰撞概率可忽略，真发生会以冲突错误返回。
+	if err := repo.RotateKey(ctx, apiKey.ID, oldKey, newKey); err != nil {
+		return nil, fmt.Errorf("rotate api key: %w", err)
+	}
+
+	apiKey.Key = newKey
+	// 进程内 L1、负缓存与 Redis L2 必须同时失效新旧两个凭据；
+	// 数据库触发器会经 outbox 向所有实例广播同一组失效事件。
+	s.InvalidateAuthCacheByKey(ctx, oldKey)
+	s.InvalidateAuthCacheByKey(ctx, newKey)
 	return apiKey, nil
 }
 
