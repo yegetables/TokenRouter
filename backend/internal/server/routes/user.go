@@ -80,6 +80,7 @@ func RegisterUserRoutes(
 			keys.GET("/billing-options", h.APIKey.GetBillingOptions)
 			keys.GET("/:id", h.APIKey.GetByID)
 			keys.POST("", h.APIKey.Create)
+			keys.POST("/:id/rotate", h.APIKey.Rotate)
 			keys.PUT("/:id", h.APIKey.Update)
 			keys.DELETE("/:id", h.APIKey.Delete)
 		}

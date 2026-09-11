@@ -349,6 +349,33 @@ func (h *APIKeyHandler) Update(c *gin.Context) {
 	response.Success(c, dto.APIKeyFromService(key))
 }
 
+// Rotate 原地轮换 API Key 凭据，保留记录 ID 与全部配置、用量和计费历史。
+// POST /api/v1/keys/:id/rotate
+func (h *APIKeyHandler) Rotate(c *gin.Context) {
+	subject, ok := middleware2.GetAuthSubjectFromContext(c)
+	if !ok {
+		response.Unauthorized(c, "User not authenticated")
+		return
+	}
+
+	keyID, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		response.BadRequest(c, "Invalid key ID")
+		return
+	}
+
+	key, err := h.apiKeyService.Rotate(c.Request.Context(), keyID, subject.UserID)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+
+	// 响应携带新凭据，禁止任何中间层缓存。
+	c.Header("Cache-Control", "no-store")
+	c.Header("Pragma", "no-cache")
+	response.Success(c, dto.APIKeyFromService(key))
+}
+
 // Delete handles deleting an API key
 // DELETE /api/v1/api-keys/:id
 func (h *APIKeyHandler) Delete(c *gin.Context) {

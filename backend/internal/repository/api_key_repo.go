@@ -563,6 +563,36 @@ func (r *apiKeyRepository) Update(ctx context.Context, key *service.APIKey, fiel
 	return nil
 }
 
+// RotateKey 以 CAS 方式原地替换凭据：只有库中 key 仍等于 expectedKey 时才写入 newKey。
+// 并发轮换时只有一个调用能成功，避免生成的新凭据被另一次轮换覆盖后用户拿到已失效的值。
+func (r *apiKeyRepository) RotateKey(ctx context.Context, id int64, expectedKey, newKey string) error {
+	client := clientFromContext(ctx, r.client)
+	affected, err := client.APIKey.Update().
+		Where(apikey.IDEQ(id), apikey.DeletedAtIsNil(), apikey.KeyEQ(expectedKey)).
+		SetKey(newKey).
+		SetUpdatedAt(time.Now()).
+		Save(ctx)
+	if err != nil {
+		// 新 key 与其它记录碰撞时唯一约束报错，映射为业务冲突。
+		return translatePersistenceError(err, nil, service.ErrAPIKeyExists)
+	}
+	if affected > 0 {
+		return nil
+	}
+
+	// CAS 未命中：记录不存在/已删除，或已被并发轮换。
+	exists, err := client.APIKey.Query().
+		Where(apikey.IDEQ(id), apikey.DeletedAtIsNil()).
+		Exist(ctx)
+	if err != nil {
+		return err
+	}
+	if !exists {
+		return service.ErrAPIKeyNotFound
+	}
+	return service.ErrAPIKeyRotateConflict
+}
+
 func (r *apiKeyRepository) Delete(ctx context.Context, id int64) error {
 	// 存在唯一键约束 生成tombstone key 用来释放原key，长度远小于 128，满足 schema 限制
 	tombstoneKey := fmt.Sprintf("__deleted__%d__%d", id, time.Now().UnixNano())

@@ -112,6 +112,8 @@ POST /api/v1/creative/runs/{id}/outputs/{index}/ack
 
 `GET /api/v1/keys/billing-options?scope=personal|team` 返回当前作用域可指定的有效订阅摘要，包括 `id`、`plan_id`、`plan_name`、`expires_at`、`groups_restricted` 和 `applicable_groups`。`GET /api/v1/groups/available?scope=personal|team&subscription_id={id}` 在带 `subscription_id` 时返回付款主体原有分组权限与该订阅套餐分组的交集；不带该参数时保持历史的可用分组结果。两个接口都不把成员自己的订阅泄露到团队作用域。
 
+`POST /api/v1/keys/{id}/rotate` 原地替换 API Key 的凭据值：保留 `id`、名称、分组、有效期、限额、IP 规则、模型映射、结算方式以及全部用量与计费历史，只改变鉴权用的 `key`。仅 Key 所有者本人可调用，服务端托管 Key 不可轮换。实现必须以 CAS 方式更新 `api_keys.key`，成功后同时失效旧、新凭据的进程内与 Redis 鉴权缓存；数据库触发器已按 `OLD.key <> NEW.key` 经 outbox 向所有实例广播同一组失效事件。
+
 网关 `GET /v1/usage` 在原有 Key 配额、订阅或余额字段之外始终返回 `billing` 对象，至少包含 `mode`、`source`、`preferred_subscription_id`、`available` 和 `unit`。`source=subscription` 时只返回实际选择的订阅额度/剩余值；指定订阅失效时仍使用该来源并标记 `available=false`，不返回余额。`source=balance` 时只返回付款主体余额，不加载或展示订阅额度。`auto` 的 `source` 随当前可用订阅动态变化；Key 自身的配额和滚动限额字段不受该展示规则影响。
 
 ## 分组客户端协议
