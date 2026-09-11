@@ -142,3 +142,4 @@ output/
 
 # 仓库根目录的 Vitest 与 Vite 缓存
 .vite/
+.agents/plans/upstream-models-metadata.md
