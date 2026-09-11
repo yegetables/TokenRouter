@@ -440,7 +440,8 @@ func normalizeCNProviderCredentials(account *Account, isCreate bool) error {
 		}
 	}
 	switch protocol {
-	case APIProtocolChatCompletions, APIProtocolAnthropic:
+	// adaptive 按入站协议动态选择原生端点，对全部国产供应商可用。
+	case APIProtocolChatCompletions, APIProtocolAnthropic, APIProtocolAdaptive:
 	case APIProtocolResponses:
 		if account.Platform != PlatformDeepseek {
 			return infraerrors.BadRequest("CN_PROVIDER_PROTOCOL_INVALID", "only DeepSeek supports Responses protocol")
