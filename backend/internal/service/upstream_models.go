@@ -77,9 +77,6 @@ func newUpstreamModelSyncUpstreamError(message string, err error) error {
 
 // FetchUpstreamSupportedModels 根据账号的上游 API 形态拉取实时支持模型列表。
 func (s *AccountTestService) FetchUpstreamSupportedModels(ctx context.Context, account *Account) ([]string, error) {
-	if s == nil {
-		return nil, newUpstreamModelSyncConfigError("Account test service is not configured", nil)
-	}
 	if account == nil {
 		return nil, newUpstreamModelSyncConfigError("Account is required", nil)
 	}
@@ -88,6 +85,63 @@ func (s *AccountTestService) FetchUpstreamSupportedModels(ctx context.Context, a
 		return s.fetchAntigravityOAuthUpstreamModels(ctx, account)
 	}
 
+	body, err := s.fetchUpstreamModelsBody(ctx, account)
+	if err != nil {
+		return nil, err
+	}
+
+	extractModels := extractUpstreamModelIDs
+	if account.IsGrok() {
+		extractModels = extractGrokUpstreamModelIDs
+	}
+	models, err := extractModels(body)
+	if err != nil {
+		return nil, newUpstreamModelSyncUpstreamError("Upstream model list response was not valid JSON", err)
+	}
+	if len(models) == 0 {
+		return nil, newUpstreamModelSyncUpstreamError("Upstream returned no supported models", nil)
+	}
+
+	return models, nil
+}
+
+// FetchUpstreamModelCatalog 拉取 OpenAI 兼容 API Key 账号上游 /v1/models 的模型 ID
+// 与上下文/能力元数据。仅支持 openai 与国产供应商（kimi/zhipu/deepseek）。
+func (s *AccountTestService) FetchUpstreamModelCatalog(ctx context.Context, account *Account) ([]string, map[string]UpstreamModelMetadata, error) {
+	if account == nil {
+		return nil, nil, newUpstreamModelSyncConfigError("Account is required", nil)
+	}
+	if account.Type != AccountTypeAPIKey {
+		return nil, nil, newUpstreamModelSyncUnsupportedError(
+			fmt.Sprintf("Unsupported account type for upstream model metadata sync: %s", account.Type), nil)
+	}
+	if !account.IsOpenAI() && !account.IsCNProvider() {
+		return nil, nil, newUpstreamModelSyncUnsupportedError(
+			fmt.Sprintf("Unsupported platform for upstream model metadata sync: %s", account.Platform), nil)
+	}
+
+	body, err := s.fetchUpstreamModelsBody(ctx, account)
+	if err != nil {
+		return nil, nil, err
+	}
+	models, err := extractUpstreamModelIDs(body)
+	if err != nil {
+		return nil, nil, newUpstreamModelSyncUpstreamError("Upstream model list response was not valid JSON", err)
+	}
+	if len(models) == 0 {
+		return nil, nil, newUpstreamModelSyncUpstreamError("Upstream returned no supported models", nil)
+	}
+	return models, ParseUpstreamModelMetadata(body), nil
+}
+
+// fetchUpstreamModelsBody 请求上游模型列表并返回原始响应体（含大小限制与状态校验）。
+func (s *AccountTestService) fetchUpstreamModelsBody(ctx context.Context, account *Account) ([]byte, error) {
+	if s == nil {
+		return nil, newUpstreamModelSyncConfigError("Account test service is not configured", nil)
+	}
+	if account == nil {
+		return nil, newUpstreamModelSyncConfigError("Account is required", nil)
+	}
 	if s.httpUpstream == nil {
 		return nil, newUpstreamModelSyncConfigError("Upstream HTTP client is not configured", nil)
 	}
@@ -112,27 +166,13 @@ func (s *AccountTestService) FetchUpstreamSupportedModels(ctx context.Context, a
 	if int64(len(body)) > bodyLimit {
 		return nil, newUpstreamModelSyncUpstreamError("Upstream model list response is too large", fmt.Errorf("response exceeds %d bytes", bodyLimit))
 	}
-
 	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
 		return nil, newUpstreamModelSyncUpstreamError(
 			fmt.Sprintf("Upstream model list request failed with HTTP %d", resp.StatusCode),
 			fmt.Errorf("upstream model list returned HTTP %d", resp.StatusCode),
 		)
 	}
-
-	extractModels := extractUpstreamModelIDs
-	if account.IsGrok() {
-		extractModels = extractGrokUpstreamModelIDs
-	}
-	models, err := extractModels(body)
-	if err != nil {
-		return nil, newUpstreamModelSyncUpstreamError("Upstream model list response was not valid JSON", err)
-	}
-	if len(models) == 0 {
-		return nil, newUpstreamModelSyncUpstreamError("Upstream returned no supported models", nil)
-	}
-
-	return models, nil
+	return body, nil
 }
 
 func (s *AccountTestService) buildUpstreamModelsRequest(ctx context.Context, account *Account) (*http.Request, error) {
