@@ -637,6 +637,30 @@ export interface MarketplaceModelPricing {
   image_price_1k?: number
   image_price_2k?: number
   image_price_4k?: number
+  time_pricing?: MarketplaceTimePricing
+  group_peak?: MarketplaceGroupPeak
+}
+
+// 分组高峰倍率（用户加价，窗口用全局系统时区）。
+export interface MarketplaceGroupPeak {
+  start_time: string
+  end_time: string
+  multiplier: number
+  active: boolean
+}
+
+// 渠道分时倍率：展示价为当前生效价，另附时段与倍率供展示。
+export interface MarketplaceTimePeriod {
+  start_time: string
+  end_time: string
+  multiplier: number
+}
+
+export interface MarketplaceTimePricing {
+  timezone: string
+  weekdays_only: boolean
+  periods: MarketplaceTimePeriod[]
+  active_multiplier: number
 }
 
 // 模型能力模态：模型广场接口从定价元数据下发，缺省时前端按模型 ID 规则兜底。
