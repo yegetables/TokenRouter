@@ -464,6 +464,14 @@ func TestCNProviderAccountModeAndCredentialValidation(t *testing.T) {
 		Credentials: map[string]any{"api_protocol": APIProtocolResponses},
 	}
 	require.Error(t, normalizeCNProviderCredentials(invalidResponses, false))
+	// adaptive 对全部国产供应商可用（DeepSeek/Kimi/智谱），按入站协议路由原生端点。
+	for _, platform := range []string{PlatformDeepseek, PlatformKimi, PlatformZhipu} {
+		adaptive := &Account{
+			Platform: platform, Type: AccountTypeAPIKey,
+			Credentials: map[string]any{"api_protocol": APIProtocolAdaptive},
+		}
+		require.NoError(t, normalizeCNProviderCredentials(adaptive, false), platform)
+	}
 	invalidType := &Account{Platform: PlatformDeepseek, Type: AccountTypeOAuth}
 	require.Error(t, normalizeCNProviderCredentials(invalidType, false))
 }
