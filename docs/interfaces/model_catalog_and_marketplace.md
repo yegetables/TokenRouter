@@ -5,6 +5,7 @@
 ## 章节导航
 
 - [目录解析](#目录解析)：修改 `/models`、默认模型或可请求交集时读取。
+- [上游元数据透传](#upstream_model_metadata_passthrough)：修改上游 `/v1/models` 上下文/能力透传、账号快照或字段映射时读取。
 - [市场可见性](#市场可见性)：修改公开分组过滤、品牌或排序时读取。
 - [目录元数据查询](#目录元数据查询)：修改名称写法、档位别名及能力来源时读取。
 - [价格展示](#价格展示)：修改渠道价格、倍率或未知价格时读取。
@@ -17,6 +18,13 @@
 请求模型与公开模型都使用同一可请求解析边界：从当前分组的可调度账号能力生成候选，再执行 Key/分组/渠道/账号的模型映射和范围校验。默认平台模型只在缺少可用解析服务的兼容场景提供基线；已经完成账号/渠道解析但结果为空时必须保持为空，不能重新回退默认列表。
 
 模型 ID 是客户端请求键，display name 是展示信息，pricing model 是定价解析键。三者可以不同。Key 级重定向和渠道映射必须让 `/v1/models`、`/models`、实际调度和响应模型恢复保持一致；目标不可请求的别名不应只出现在列表里。
+
+<a id="upstream_model_metadata_passthrough"></a>
+## 上游元数据透传
+
+账号级「同步上游模型」对 OpenAI 兼容 API Key 账号（openai 与 kimi/zhipu/deepseek）请求上游 `/v1/models`，把声明的上下文与能力写入账号快照 `account.extra.upstream_model_metadata`；其它平台账号不写快照。快照只读、不参与计费，字段与 sub2api 对齐：canonical 为 `context_window`、`max_output_tokens`、`input_modalities`、`reasoning`、`supported_reasoning_levels`，扩展能力为 `supports_tools`/`supports_vision`/`supports_anthropic`/`supports_responses`、`responses_modes`、`responses_capabilities`。上游未声明的字段一律省略，不推断、不补；显式 `supports_vision` 预映射 `input_modalities`（`true` → `["text","image"]`，`false` → `["text"]`）。**所有价格字段都不进入快照**。
+
+`GET /v1/models` 的每条模型命中分组内账号快照时，附加 `context_length` 与别名 `context_window`、`max_completion_tokens` 与别名 `max_output_tokens`、`supports_tools`/`supports_reasoning`/`supports_vision`/`supports_anthropic`/`supports_responses`、`responses_modes`、`responses_capabilities`、`input_modalities`；未命中或未声明时不输出，保持历史响应结构。该透传无账号/分组开关，只读本地快照、不发起上游请求，Anthropic/Gemini 等无快照分组不会多出这些字段。
 
 ## 市场可见性
 
