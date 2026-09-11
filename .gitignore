@@ -142,4 +142,5 @@ output/
 
 # 仓库根目录的 Vitest 与 Vite 缓存
 .vite/
-.agents/plans/upstream-models-metadata.md
+# 本地计划文件目录（project-doc 计划，不提交）
+.agents/plans/
