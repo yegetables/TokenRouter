@@ -290,11 +290,16 @@ func maxReasoningEffortBillingMultiplier(model, effort string, pricing *ModelPri
 	return 1
 }
 
+// resolvedChannelTimeMultiplier 返回生效的渠道成本分时倍率；无配置时返回 1。
+// 分组价卡与渠道价卡都生效，分组价卡命中时由解析器补齐渠道分时。
 func resolvedChannelTimeMultiplier(resolved *ResolvedPricing, at time.Time) float64 {
-	if resolved == nil || resolved.Source != PricingSourceChannel || resolved.channelPricing == nil {
+	if resolved == nil {
 		return 1
 	}
-	return resolved.channelPricing.TimePricing.MultiplierAt(at)
+	if resolved.Source != PricingSourceGroup && resolved.Source != PricingSourceChannel {
+		return 1
+	}
+	return resolved.effectiveTimePricing().MultiplierAt(at)
 }
 
 // ErrModelPricingUnavailable 表示当前所有定价来源都无法为请求模型提供价格。
@@ -1896,6 +1901,34 @@ type ModelDisplayPricing struct {
 	ImagePrice1K                  float64
 	ImagePrice2K                  float64
 	ImagePrice4K                  float64
+	// TimePricing 是渠道分时倍率配置；展示价已按当前时刻套用倍率，这里附带配置供展示时段与倍率。
+	TimePricing *ModelDisplayTimePricing
+	// GroupPeak 是分组高峰倍率（用户加价）的展示信息；未启用时为 nil。
+	GroupPeak *ModelDisplayGroupPeak
+}
+
+// ModelDisplayGroupPeak 是分组高峰倍率的展示快照。窗口使用全局系统时区、单段。
+type ModelDisplayGroupPeak struct {
+	StartTime  string
+	EndTime    string
+	Multiplier float64
+	Active     bool
+}
+
+// ModelDisplayTimePricing 是渠道每日分时倍率的展示快照。
+type ModelDisplayTimePricing struct {
+	Timezone     string
+	WeekdaysOnly bool
+	Periods      []ModelDisplayTimePeriod
+	// ActiveMultiplier 是当前时刻生效的倍率；1 表示波谷。
+	ActiveMultiplier float64
+}
+
+// ModelDisplayTimePeriod 是单个分时时段（本地时间，HH:mm / HH:mm:ss）。
+type ModelDisplayTimePeriod struct {
+	StartTime  string
+	EndTime    string
+	Multiplier float64
 }
 
 // ModelDisplayPricingInterval 是按上下文 token 区间展示的模型价格。
@@ -1979,12 +2012,19 @@ func displayPricingFromResolved(model string, rateMultiplier float64, imageRateM
 		if pricing != nil && !resolved.longContextPricingEnabled {
 			pricing = withoutLongContextDisplayPricing(pricing)
 		}
+		now := time.Now()
+		// 渠道分时倍率按请求时刻叠加到分组倍率上，展示价即当前生效价。
+		displayRate := rateMultiplier * resolvedChannelTimeMultiplier(resolved, now)
 		if pricing != nil && (hasAnyDisplayTokenPricing(pricing) || resolved.HasEffectiveOverridePricing()) {
-			return buildTokenDisplayPricing(pricing, rateMultiplier), true
+			display := buildTokenDisplayPricing(pricing, displayRate)
+			display.TimePricing = modelDisplayTimePricing(resolved, now)
+			return display, true
 		}
-		intervals := resolvedDisplayPricingIntervals(resolved, rateMultiplier)
+		intervals := resolvedDisplayPricingIntervals(resolved, displayRate)
 		if len(intervals) > 0 {
-			return buildTokenIntervalDisplayPricing(intervals), true
+			display := buildTokenIntervalDisplayPricing(intervals)
+			display.TimePricing = modelDisplayTimePricing(resolved, now)
+			return display, true
 		}
 		return ModelDisplayPricing{}, false
 	case BillingModeImage, BillingModePerRequest:
@@ -2005,6 +2045,34 @@ func displayPricingFromResolved(model string, rateMultiplier float64, imageRateM
 		), true
 	default:
 		return ModelDisplayPricing{}, false
+	}
+}
+
+// modelDisplayTimePricing 返回生效的渠道成本分时配置快照；未配置时返回 nil。
+func modelDisplayTimePricing(resolved *ResolvedPricing, at time.Time) *ModelDisplayTimePricing {
+	if resolved == nil {
+		return nil
+	}
+	if resolved.Source != PricingSourceGroup && resolved.Source != PricingSourceChannel {
+		return nil
+	}
+	config := resolved.effectiveTimePricing()
+	if config == nil || len(config.Periods) == 0 {
+		return nil
+	}
+	periods := make([]ModelDisplayTimePeriod, 0, len(config.Periods))
+	for _, period := range config.Periods {
+		periods = append(periods, ModelDisplayTimePeriod{
+			StartTime:  period.StartTime,
+			EndTime:    period.EndTime,
+			Multiplier: period.Multiplier,
+		})
+	}
+	return &ModelDisplayTimePricing{
+		Timezone:         config.Timezone,
+		WeekdaysOnly:     config.WeekdaysOnly,
+		Periods:          periods,
+		ActiveMultiplier: config.MultiplierAt(at),
 	}
 }
 

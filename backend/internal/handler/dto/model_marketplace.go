@@ -33,6 +33,31 @@ type ModelMarketplacePricing struct {
 	ImagePrice1K                  float64                           `json:"image_price_1k,omitempty"`
 	ImagePrice2K                  float64                           `json:"image_price_2k,omitempty"`
 	ImagePrice4K                  float64                           `json:"image_price_4k,omitempty"`
+	TimePricing                   *ModelMarketplaceTimePricing      `json:"time_pricing,omitempty"`
+	GroupPeak                     *ModelMarketplaceGroupPeak        `json:"group_peak,omitempty"`
+}
+
+// ModelMarketplaceGroupPeak 是分组高峰倍率展示信息（用户加价，窗口用全局系统时区）。
+type ModelMarketplaceGroupPeak struct {
+	StartTime  string  `json:"start_time"`
+	EndTime    string  `json:"end_time"`
+	Multiplier float64 `json:"multiplier"`
+	Active     bool    `json:"active"`
+}
+
+// ModelMarketplaceTimePricing 是渠道分时倍率配置；展示价已按当前时刻生效。
+type ModelMarketplaceTimePricing struct {
+	Timezone         string                       `json:"timezone"`
+	WeekdaysOnly     bool                         `json:"weekdays_only"`
+	Periods          []ModelMarketplaceTimePeriod `json:"periods"`
+	ActiveMultiplier float64                      `json:"active_multiplier"`
+}
+
+// ModelMarketplaceTimePeriod 是单个分时时段（本地时间）。
+type ModelMarketplaceTimePeriod struct {
+	StartTime  string  `json:"start_time"`
+	EndTime    string  `json:"end_time"`
+	Multiplier float64 `json:"multiplier"`
 }
 
 // ModelMarketplacePricingInterval 是前端模型广场展示用的上下文区间价格。
@@ -230,6 +255,42 @@ func modelMarketplacePricingFromService(pricing service.ModelDisplayPricing) Mod
 		ImagePrice1K:                  pricing.ImagePrice1K,
 		ImagePrice2K:                  pricing.ImagePrice2K,
 		ImagePrice4K:                  pricing.ImagePrice4K,
+		TimePricing:                   modelMarketplaceTimePricingFromService(pricing.TimePricing),
+		GroupPeak:                     modelMarketplaceGroupPeakFromService(pricing.GroupPeak),
+	}
+}
+
+// modelMarketplaceGroupPeakFromService 将分组高峰倍率展示信息转换为公开 DTO。
+func modelMarketplaceGroupPeakFromService(groupPeak *service.ModelDisplayGroupPeak) *ModelMarketplaceGroupPeak {
+	if groupPeak == nil {
+		return nil
+	}
+	return &ModelMarketplaceGroupPeak{
+		StartTime:  groupPeak.StartTime,
+		EndTime:    groupPeak.EndTime,
+		Multiplier: groupPeak.Multiplier,
+		Active:     groupPeak.Active,
+	}
+}
+
+// modelMarketplaceTimePricingFromService 将渠道分时倍率配置转换为公开 DTO。
+func modelMarketplaceTimePricingFromService(timePricing *service.ModelDisplayTimePricing) *ModelMarketplaceTimePricing {
+	if timePricing == nil || len(timePricing.Periods) == 0 {
+		return nil
+	}
+	periods := make([]ModelMarketplaceTimePeriod, 0, len(timePricing.Periods))
+	for _, period := range timePricing.Periods {
+		periods = append(periods, ModelMarketplaceTimePeriod{
+			StartTime:  period.StartTime,
+			EndTime:    period.EndTime,
+			Multiplier: period.Multiplier,
+		})
+	}
+	return &ModelMarketplaceTimePricing{
+		Timezone:         timePricing.Timezone,
+		WeekdaysOnly:     timePricing.WeekdaysOnly,
+		Periods:          periods,
+		ActiveMultiplier: timePricing.ActiveMultiplier,
 	}
 }
 

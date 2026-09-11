@@ -498,6 +498,61 @@ func TestCalculateCostUnified_ExplicitIntervalsDoNotReapplyLongContextMultiplier
 	require.InDelta(t, longCacheRead*groupRate, displayLong.CacheReadPricePerToken, 1e-12)
 }
 
+// 分时倍率在展示投影里按当前时刻生效（分组价与渠道价都适用）：
+// 展示价 = 基础价 × 分组倍率 × 当前分时倍率。
+// 时段用覆盖全天（00:00-12:00 + 12:00-24:00）的两段，断言与运行时刻无关。
+func TestDisplayPricingFromResolvedAppliesTimeMultiplierForGroupAndChannel(t *testing.T) {
+	base := &ModelPricing{
+		InputPricePerToken:     1e-6,
+		OutputPricePerToken:    4e-6,
+		CacheReadPricePerToken: 2e-8,
+	}
+	timePricing := &ChannelTimePricing{
+		Timezone: "UTC",
+		Periods: []ChannelTimePricingPeriod{
+			{StartTime: "00:00", EndTime: "12:00", Multiplier: 2},
+			{StartTime: "12:00", EndTime: "00:00", Multiplier: 2},
+		},
+	}
+
+	for _, source := range []string{PricingSourceGroup, PricingSourceChannel} {
+		t.Run(source, func(t *testing.T) {
+			configured := &ChannelModelPricing{
+				Platform:    PlatformDeepseek,
+				Models:      []string{"deepseek-flash"},
+				BillingMode: BillingModeToken,
+			}
+			resolved := &ResolvedPricing{
+				Mode:           BillingModeToken,
+				Source:         source,
+				BasePricing:    base,
+				channelPricing: configured,
+			}
+			if source == PricingSourceGroup {
+				// 分组价卡自身不含分时；成本分时来自渠道，由解析器补齐到 timePricing。
+				resolved.timePricing = timePricing
+			} else {
+				configured.TimePricing = timePricing
+			}
+
+			display, ok := displayPricingFromResolved("deepseek-flash", 1, 1, resolved)
+			require.True(t, ok)
+			require.InDelta(t, 2e-6, display.InputPricePerToken, 1e-12)
+			require.InDelta(t, 8e-6, display.OutputPricePerToken, 1e-12)
+			require.InDelta(t, 4e-8, display.CacheReadPricePerToken, 1e-12)
+			require.NotNil(t, display.TimePricing)
+			require.InDelta(t, 2, display.TimePricing.ActiveMultiplier, 1e-12)
+			require.Len(t, display.TimePricing.Periods, 2)
+			require.InDelta(t, 2, display.TimePricing.Periods[0].Multiplier, 1e-12)
+
+			// 分组倍率与分时倍率叠乘。
+			withGroupRate, ok := displayPricingFromResolved("deepseek-flash", 3, 3, resolved)
+			require.True(t, ok)
+			require.InDelta(t, 6e-6, withGroupRate.InputPricePerToken, 1e-12)
+		})
+	}
+}
+
 func TestCalculateCost_OpenAIGPT55ProLongContextAppliesWholeSessionMultipliers(t *testing.T) {
 	svc := newTestBillingServiceWithOpenAILadderCatalog(t)
 
