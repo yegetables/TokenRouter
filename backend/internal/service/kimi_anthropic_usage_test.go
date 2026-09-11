@@ -1,8 +1,10 @@
 package service
 
 import (
+	"context"
 	"encoding/json"
 	"testing"
+	"time"
 
 	"github.com/TokenFlux/TokenRouter/internal/config"
 	"github.com/TokenFlux/TokenRouter/internal/pkg/apicompat"
@@ -224,6 +226,10 @@ func TestCNProviderAnthropicUsageBillsUncachedInput(t *testing.T) {
 	}
 
 	billing := NewBillingService(&config.Config{}, nil)
+	resolver := NewModelPricingResolver(nil, billing)
+	// 固定为非高峰时刻（北京 2026-08-24 20:00），避免内置 DeepSeek 峰谷随墙钟
+	// 变化让断言在 09:00–12:00 / 14:00–18:00 高峰窗口抖动。
+	offPeak := time.Date(2026, 8, 24, 12, 0, 0, 0, time.UTC)
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			claudeUsage := parseClaudeUsageFromResponseBody([]byte(tt.body))
@@ -231,12 +237,19 @@ func TestCNProviderAnthropicUsageBillsUncachedInput(t *testing.T) {
 			uncachedInput := max(openAIUsage.InputTokens-openAIUsage.CacheReadInputTokens-openAIUsage.CacheCreationInputTokens, 0)
 			require.Equal(t, tt.wantInput, uncachedInput)
 
-			cost, err := billing.CalculateCost(tt.model, UsageTokens{
-				InputTokens:         uncachedInput,
-				OutputTokens:        openAIUsage.OutputTokens,
-				CacheCreationTokens: openAIUsage.CacheCreationInputTokens,
-				CacheReadTokens:     openAIUsage.CacheReadInputTokens,
-			}, 1)
+			cost, err := billing.CalculateCostUnified(CostInput{
+				Ctx:   context.Background(),
+				Model: tt.model,
+				Tokens: UsageTokens{
+					InputTokens:         uncachedInput,
+					OutputTokens:        openAIUsage.OutputTokens,
+					CacheCreationTokens: openAIUsage.CacheCreationInputTokens,
+					CacheReadTokens:     openAIUsage.CacheReadInputTokens,
+				},
+				RateMultiplier: 1,
+				PricingAt:      offPeak,
+				Resolver:       resolver,
+			})
 			require.NoError(t, err)
 			require.Positive(t, cost.InputCost, "uncached input must contribute to the final charge")
 
