@@ -70,6 +70,25 @@
           </div>
         </div>
 
+        <div
+          v-if="timePricing || groupPeak"
+          class="mb-3 space-y-1 rounded-lg bg-gray-50 px-2.5 py-2 text-xs leading-relaxed text-gray-600 dark:bg-dark-800 dark:text-dark-300"
+          data-testid="pricing-time-info"
+        >
+          <template v-if="timePricing">
+            <div class="font-semibold text-gray-800 dark:text-dark-100" data-testid="pricing-time-current">
+              {{ t('marketplace.pricingCurrentTier', { tier: currentTimeTierLabel, multiplier: formatTimeMultiplier(timePricing.active_multiplier) }) }}
+            </div>
+            <div v-for="tier in timeTiers" :key="tier.key" data-testid="pricing-time-tier">
+              {{ t('marketplace.pricingTimeTier', { tier: tier.label, multiplier: formatTimeMultiplier(tier.multiplier), ranges: tier.ranges }) }}
+            </div>
+          </template>
+          <div v-if="groupPeak" data-testid="pricing-group-peak">
+            {{ t('marketplace.pricingGroupPeak', { multiplier: formatTimeMultiplier(groupPeak.multiplier), start: groupPeak.start_time, end: groupPeak.end_time }) }}
+            <span v-if="groupPeak.active" class="ml-1 font-semibold text-amber-600 dark:text-amber-400">{{ t('marketplace.pricingInUse') }}</span>
+          </div>
+        </div>
+
         <!-- 完整定价：单列展示，标签与价格都不换行。 -->
         <div v-if="activeRows.length > 0" class="space-y-2.5" data-testid="pricing-rows">
           <div
@@ -94,7 +113,7 @@ import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import Icon from '@/components/icons/Icon.vue'
 import { useBalanceDisplay } from '@/composables/useBalanceDisplay'
-import type { MarketplaceModel, MarketplaceModelPricing, MarketplacePricingInterval } from '@/types'
+import type { MarketplaceModel, MarketplaceModelPricing, MarketplacePricingInterval, MarketplaceTimePricing } from '@/types'
 
 // 抽屉式完整定价面板：原地展开收起、上下文区间与 fast mode 切换都收敛在卡片内部。
 const props = defineProps<{
@@ -296,6 +315,59 @@ const selectableIntervals = computed(() =>
 const activeIntervalIndex = computed(() =>
   Math.min(selectedIntervalIndex.value, Math.max(0, selectableIntervals.value.length - 1))
 )
+
+// —— 分时倍率：展示价为当前生效价，另展示时段、当前波峰/波谷与倍率 ——
+
+function formatTimeMultiplier(value: number): string {
+  return Number.isInteger(value) ? String(value) : String(Number(value.toFixed(2)))
+}
+
+function formatTimeRange(start: string, end: string): string {
+  const normalizedEnd = /^00:00(:00)?$/.test(end) ? '24:00' : end.slice(0, 5)
+  return `${start.slice(0, 5)}–${normalizedEnd}`
+}
+
+const timePricing = computed<MarketplaceTimePricing | null>(() => {
+  const config = props.model.pricing.time_pricing
+  if (!config || !Array.isArray(config.periods) || config.periods.length === 0) return null
+  return config
+})
+
+// 分组高峰倍率（用户加价）；展示价已把它乘进去。
+const groupPeak = computed(() => props.model.pricing.group_peak ?? null)
+
+const currentTimeTierLabel = computed(() =>
+  (timePricing.value?.active_multiplier ?? 1) > 1 ? t('marketplace.pricingPeak') : t('marketplace.pricingOffPeak')
+)
+
+// 按倍率聚合时段；未显式配置的其余时间按波谷 ×1 展示。
+const timeTiers = computed(() => {
+  const config = timePricing.value
+  if (!config) return []
+  const groups = new Map<number, string[]>()
+  for (const period of config.periods) {
+    const ranges = groups.get(period.multiplier) ?? []
+    ranges.push(formatTimeRange(period.start_time, period.end_time))
+    groups.set(period.multiplier, ranges)
+  }
+  const tiers = [...groups.entries()]
+    .sort((a, b) => b[0] - a[0])
+    .map(([multiplier, ranges]) => ({
+      key: `m-${multiplier}`,
+      multiplier,
+      label: multiplier > 1 ? t('marketplace.pricingPeak') : t('marketplace.pricingOffPeak'),
+      ranges: ranges.join(', '),
+    }))
+  if (!groups.has(1)) {
+    tiers.push({
+      key: 'm-1-baseline',
+      multiplier: 1,
+      label: t('marketplace.pricingOffPeak'),
+      ranges: t('marketplace.pricingOtherTimes'),
+    })
+  }
+  return tiers
+})
 
 // 定价数据来源：选中区间优先，否则用模型顶层价格。
 const activeSource = computed<MarketplaceModelPricing | MarketplacePricingInterval>(() =>

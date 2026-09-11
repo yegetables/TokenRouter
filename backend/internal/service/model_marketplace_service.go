@@ -405,6 +405,7 @@ func (s *ModelMarketplaceService) buildPublicModelsForGroup(ctx context.Context,
 		pricing := unknownDisplayPricing()
 		if s.billingService != nil && !modelDef.PricingAmbiguous {
 			pricing = s.getRequestableModelDisplayPricing(ctx, group, modelDef, imageConfig)
+			pricing.GroupPeak = marketplaceGroupPeakDisplay(group, time.Now())
 		}
 		inputModalities, outputModalities := s.marketplaceModelModalities(modelDef)
 
@@ -447,7 +448,7 @@ func (s *ModelMarketplaceService) getRequestableModelDisplayPricing(ctx context.
 		groupID := group.ID
 		resolved := s.gatewayService.resolver.Resolve(ctx, PricingInput{Model: pricingModel, GroupID: &groupID, Group: group})
 		if resolved.HasEffectiveOverridePricing() {
-			return s.billingService.getDisplayPricingWithResolvedMultipliers(pricingModel, group.RateMultiplier, imageRateMultiplier, imageConfig, resolved)
+			return s.billingService.getDisplayPricingWithResolvedMultipliers(pricingModel, marketplaceTokenRateMultiplier(group), imageRateMultiplier, imageConfig, resolved)
 		}
 	}
 	// Qoder 内置别名和路由键必须由渠道手工定价，不能回退到默认模型价格。
@@ -455,7 +456,7 @@ func (s *ModelMarketplaceService) getRequestableModelDisplayPricing(ctx context.
 		return unknownDisplayPricing()
 	}
 	if qoderCanUseDefaultDisplayPricing(s.billingService, pricingModel) {
-		return s.billingService.getDisplayPricing(pricingModel, group.RateMultiplier, imageRateMultiplier, imageConfig)
+		return s.billingService.getDisplayPricing(pricingModel, marketplaceTokenRateMultiplier(group), imageRateMultiplier, imageConfig)
 	}
 	return unknownDisplayPricing()
 }
@@ -472,13 +473,13 @@ func (s *ModelMarketplaceService) getPublicModelDisplayPricing(ctx context.Conte
 			billingModel, _, _ = s.qoderMarketplacePricingModels(ctx, group, model, baseHint)
 			resolved, pricingModel := s.gatewayService.resolveQoderChannelPricingForUsage(ctx, billingModel, &APIKey{Group: group})
 			if resolved != nil && resolved.HasEffectiveChannelPricing() {
-				return s.billingService.getDisplayPricingWithResolvedMultipliers(pricingModel, group.RateMultiplier, imageRateMultiplier, imageConfig, resolved)
+				return s.billingService.getDisplayPricingWithResolvedMultipliers(pricingModel, marketplaceTokenRateMultiplier(group), imageRateMultiplier, imageConfig, resolved)
 			}
 		}
 		if qoderAliasRequiresManualPricingAny(billingModel) || !qoderCanUseDefaultDisplayPricing(s.billingService, billingModel) {
 			return unknownDisplayPricing()
 		}
-		pricing := s.billingService.getDisplayPricing(billingModel, group.RateMultiplier, imageRateMultiplier, imageConfig)
+		pricing := s.billingService.getDisplayPricing(billingModel, marketplaceTokenRateMultiplier(group), imageRateMultiplier, imageConfig)
 		if pricing.PriceStatus != "unpriced" {
 			return pricing
 		}
@@ -491,9 +492,9 @@ func (s *ModelMarketplaceService) getPublicModelDisplayPricing(ctx context.Conte
 			GroupID: &groupID,
 			Group:   group,
 		})
-		return s.billingService.getDisplayPricingWithResolvedMultipliers(model, group.RateMultiplier, imageRateMultiplier, imageConfig, resolved)
+		return s.billingService.getDisplayPricingWithResolvedMultipliers(model, marketplaceTokenRateMultiplier(group), imageRateMultiplier, imageConfig, resolved)
 	}
-	return s.billingService.getDisplayPricing(model, group.RateMultiplier, imageRateMultiplier, imageConfig)
+	return s.billingService.getDisplayPricing(model, marketplaceTokenRateMultiplier(group), imageRateMultiplier, imageConfig)
 }
 
 // marketplaceImageRateMultiplier 返回模型广场图片价格应使用的倍率。
@@ -508,6 +509,28 @@ func marketplaceImageRateMultiplier(group *Group) float64 {
 		return 0
 	}
 	return group.ImageRateMultiplier
+}
+
+// marketplaceTokenRateMultiplier 返回展示用的 token 倍率：分组倍率叠加当前分组高峰因子，
+// 与结算口径一致（结算把用户倍率算作 分组倍率 × 高峰因子）。图片按次倍率不含高峰。
+func marketplaceTokenRateMultiplier(group *Group) float64 {
+	if group == nil {
+		return 1
+	}
+	return group.RateMultiplier * group.PeakMultiplierAt(time.Now())
+}
+
+// marketplaceGroupPeakDisplay 返回分组高峰倍率的展示信息；未启用时返回 nil。
+func marketplaceGroupPeakDisplay(group *Group, now time.Time) *ModelDisplayGroupPeak {
+	if group == nil || !group.PeakRateEnabled || group.PeakStart == "" || group.PeakEnd == "" {
+		return nil
+	}
+	return &ModelDisplayGroupPeak{
+		StartTime:  group.PeakStart,
+		EndTime:    group.PeakEnd,
+		Multiplier: group.PeakRateMultiplier,
+		Active:     group.PeakMultiplierAt(now) != 1,
+	}
 }
 
 func qoderCanUseDefaultDisplayPricing(billingService *BillingService, model string) bool {

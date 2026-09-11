@@ -14,7 +14,7 @@ vi.mock('vue-i18n', async () => {
   return {
     ...actual,
     useI18n: () => ({
-      t: (key: string) => key,
+      t: (key: string, params?: Record<string, unknown>) => (params ? `${key}:${JSON.stringify(params)}` : key),
     }),
   }
 })
@@ -193,5 +193,38 @@ describe('ModelPricingPanel', () => {
     expect(wrapper.text()).toContain('1K')
     expect(wrapper.find('[data-testid="pricing-fast-switch"]').exists()).toBe(false)
     expect(wrapper.find('[data-testid="pricing-interval-switch"]').exists()).toBe(false)
+  })
+
+  it('分时倍率展示时段、当前波峰与倍率，价格用当前生效价', async () => {
+    const wrapper = mountPanel(marketplaceModel('m1', {
+      pricing_mode: 'token',
+      price_status: 'priced',
+      input_price_per_token: 0.000002,
+      output_price_per_token: 0.000008,
+      time_pricing: {
+        timezone: 'Asia/Shanghai',
+        weekdays_only: true,
+        periods: [
+          { start_time: '09:00', end_time: '12:00', multiplier: 2 },
+          { start_time: '14:00', end_time: '18:00', multiplier: 2 },
+        ],
+        active_multiplier: 2,
+      },
+    }))
+
+    await wrapper.get('[data-testid="model-pricing-toggle"]').trigger('click')
+
+    const current = wrapper.get('[data-testid="pricing-time-current"]')
+    expect(current.text()).toContain('marketplace.pricingCurrentTier')
+    expect(current.text()).toContain('marketplace.pricingPeak')
+    expect(current.text()).toContain('"multiplier":"2"')
+
+    const tiers = wrapper.findAll('[data-testid="pricing-time-tier"]').map((el) => el.text()).join('\n')
+    expect(tiers).toContain('09:00–12:00')
+    expect(tiers).toContain('14:00–18:00')
+    expect(tiers).toContain('marketplace.pricingOtherTimes')
+
+    // 当前生效价（含倍率）直接展示：0.000008/Token = 8.00/百万。
+    expect(wrapper.text()).toContain('8.00')
   })
 })

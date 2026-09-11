@@ -57,6 +57,8 @@ GPT-5.6 系列的内置目录、白名单和配置导出只提供 `gpt-5.6-sol/t
 
 渠道和账号统计 API 的 `cache_write_1h_price` 是可选字段。`cache_write_price` 代表 5m 档；当 1h 字段存在时，模型广场和结算按用量中的 5m/1h 明细分别计价，并在公开 DTO 中下发两个单价；字段缺失则保持历史单价行为。
 
+渠道配置每日分时倍率（`time_pricing`）时，模型广场展示价在“基础价 × 分组倍率”的同一投影里按请求时刻叠加当前生效倍率，因此 `pricing` 各单价即当前生效价，与结算口径一致；同时下发 `time_pricing`（`timezone`、`weekdays_only`、`periods` 的起止与 `multiplier`、`active_multiplier`），供前端展示时段、当前波峰/波谷与倍率。非渠道价或未配置分时倍率时不输出该字段。基础价取自分组价卡时渠道不参与定价，分时倍率单独取该分组+模型的渠道成本分时，使分组价格同样能感知渠道的成本分时；该叠加与结算同源。
+
 未知或歧义价格使用 `unpriced`/unknown 状态，不填 0。显式价格指针为 0 才表示免费。Qoder 内置别名和路由键要求手工渠道价格，不能回退通用模型价；具体优先级见[Qoder 原生上游](qoder_upstream.md)。
 
 <a id="group_availability_probe"></a>

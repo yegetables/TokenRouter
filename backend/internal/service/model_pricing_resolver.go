@@ -45,6 +45,10 @@ type ResolvedPricing struct {
 	// 渠道定价原始配置（用于区间模式下获取图片输出价格）
 	channelPricing *ChannelModelPricing
 
+	// timePricing 是生效的渠道成本分时配置；分组价卡命中且自身无分时时，
+	// 由解析器从渠道补齐，使分组价格也能感知渠道的成本分时。
+	timePricing *ChannelTimePricing
+
 	longContextPricingEnabled bool
 }
 
@@ -85,6 +89,7 @@ func (r *ModelPricingResolver) Resolve(ctx context.Context, input PricingInput) 
 		}
 		resolved := r.resolveConfiguredPricing(groupPricing, input.Model, PricingSourceGroup)
 		resolved.longContextPricingEnabled = longContextPricingEnabled
+		r.attachChannelTimePricing(ctx, input, resolved)
 		return resolved
 	}
 
@@ -150,6 +155,21 @@ func (r *ModelPricingResolver) Resolve(ctx context.Context, input PricingInput) 
 
 func (r *ResolvedPricing) IsUnpriced() bool {
 	return r != nil && r.Source == PricingSourceUnpriced
+}
+
+// effectiveTimePricing 返回生效的渠道成本分时配置：
+// 优先专用字段（分组价卡命中时由解析器从渠道补齐），否则用当前价卡自身的配置。
+func (r *ResolvedPricing) effectiveTimePricing() *ChannelTimePricing {
+	if r == nil {
+		return nil
+	}
+	if r.timePricing != nil {
+		return r.timePricing
+	}
+	if r.channelPricing != nil {
+		return r.channelPricing.TimePricing
+	}
+	return nil
 }
 
 func (r *ResolvedPricing) HasEffectiveChannelPricing() bool {
@@ -273,6 +293,29 @@ func (r *ModelPricingResolver) lookupChannelPricingNormalized(ctx context.Contex
 		return nil
 	}
 	return r.channelService.GetEffectiveChannelModelPricing(ctx, groupID, normalized)
+}
+
+// attachChannelTimePricing 让分组价卡也能感知渠道的成本分时。
+// 分组价卡自身不含分时（写入时被拒绝），成本分时来自渠道；分组价卡命中时
+// 渠道不参与定价，因此这里单独查询渠道成本分时并挂到解析结果上。
+func (r *ModelPricingResolver) attachChannelTimePricing(ctx context.Context, input PricingInput, resolved *ResolvedPricing) {
+	if r == nil || r.channelService == nil || resolved == nil {
+		return
+	}
+	if resolved.channelPricing != nil && resolved.channelPricing.TimePricing != nil {
+		return
+	}
+	groupID := input.GroupID
+	if groupID == nil && input.Group != nil {
+		id := input.Group.ID
+		groupID = &id
+	}
+	if groupID == nil {
+		return
+	}
+	if channelPricing := r.lookupChannelPricingNormalized(ctx, *groupID, input.Model); channelPricing != nil {
+		resolved.timePricing = channelPricing.TimePricing
+	}
 }
 
 // applyChannelOverrides 应用渠道定价覆盖
