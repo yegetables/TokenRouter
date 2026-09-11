@@ -57,6 +57,8 @@ type fakeSMTPServer struct {
 	listener          net.Listener
 	tlsConfig         *tls.Config
 	advertiseStartTLS bool
+	// loginOnly 模拟 Outlook：只广告 AUTH LOGIN，对 AUTH PLAIN 回 504。
+	loginOnly bool
 
 	mu       sync.Mutex
 	commands []string
@@ -64,7 +66,15 @@ type fakeSMTPServer struct {
 	wg       sync.WaitGroup
 }
 
-func startFakeSMTPServer(t *testing.T, implicitTLS, advertiseStartTLS bool) (*fakeSMTPServer, int) {
+// fakeSMTPOption 调整 fakeSMTPServer 行为，必须在开始服务前应用。
+type fakeSMTPOption func(*fakeSMTPServer)
+
+// withLoginOnlyAuth 让服务器只支持 AUTH LOGIN（复现 Outlook 504 场景）。
+func withLoginOnlyAuth() fakeSMTPOption {
+	return func(s *fakeSMTPServer) { s.loginOnly = true }
+}
+
+func startFakeSMTPServer(t *testing.T, implicitTLS, advertiseStartTLS bool, opts ...fakeSMTPOption) (*fakeSMTPServer, int) {
 	t.Helper()
 	cert, pool := newSMTPTestCert(t)
 	prevPool := smtpTestRootCAs
@@ -79,6 +89,9 @@ func startFakeSMTPServer(t *testing.T, implicitTLS, advertiseStartTLS bool) (*fa
 		listener:          listener,
 		tlsConfig:         &tls.Config{Certificates: []tls.Certificate{cert}, MinVersion: tls.VersionTLS12},
 		advertiseStartTLS: advertiseStartTLS,
+	}
+	for _, opt := range opts {
+		opt(srv)
 	}
 	if implicitTLS {
 		srv.listener = tls.NewListener(listener, srv.tlsConfig)
@@ -128,6 +141,38 @@ func (srv *fakeSMTPServer) sawCommand(prefix string) bool {
 	return false
 }
 
+// authAdvertLine 返回 EHLO 中广告的 AUTH 机制行。
+func (srv *fakeSMTPServer) authAdvertLine() string {
+	if srv.loginOnly {
+		return "250-AUTH LOGIN"
+	}
+	return "250-AUTH PLAIN LOGIN"
+}
+
+// handleAuthLine 处理 AUTH 命令；返回 false 表示连接应关闭。
+// loginOnly 时对 AUTH PLAIN 回 504（复现 Outlook），AUTH LOGIN 走用户名/密码挑战。
+func (srv *fakeSMTPServer) handleAuthLine(reader *bufio.Reader, writeLine func(string) bool, upper string) bool {
+	if strings.HasPrefix(upper, "AUTH LOGIN") {
+		if !writeLine("334 VXNlcm5hbWU6") { // "Username:"
+			return false
+		}
+		if _, err := reader.ReadString('\n'); err != nil {
+			return false
+		}
+		if !writeLine("334 UGFzc3dvcmQ6") { // "Password:"
+			return false
+		}
+		if _, err := reader.ReadString('\n'); err != nil {
+			return false
+		}
+		return writeLine("235 2.7.0 authentication successful")
+	}
+	if srv.loginOnly && strings.HasPrefix(upper, "AUTH PLAIN") {
+		return writeLine("504 5.7.4 Unrecognized authentication type")
+	}
+	return writeLine("235 2.7.0 authentication successful")
+}
+
 func (srv *fakeSMTPServer) serve(conn net.Conn, allowStartTLS bool) {
 	reader := bufio.NewReader(conn)
 	writer := bufio.NewWriter(conn)
@@ -154,7 +199,7 @@ func (srv *fakeSMTPServer) serve(conn net.Conn, allowStartTLS bool) {
 			if allowStartTLS {
 				ok = ok && writeLine("250-STARTTLS")
 			}
-			if !(ok && writeLine("250-AUTH PLAIN LOGIN") && writeLine("250 8BITMIME")) {
+			if !(ok && writeLine(srv.authAdvertLine()) && writeLine("250 8BITMIME")) {
 				return
 			}
 		case upper == "STARTTLS" && allowStartTLS:
@@ -168,7 +213,7 @@ func (srv *fakeSMTPServer) serve(conn net.Conn, allowStartTLS bool) {
 			srv.serveUpgraded(tlsConn)
 			return
 		case strings.HasPrefix(upper, "AUTH"):
-			if !writeLine("235 2.7.0 authentication successful") {
+			if !srv.handleAuthLine(reader, writeLine, upper) {
 				return
 			}
 		case strings.HasPrefix(upper, "MAIL"), strings.HasPrefix(upper, "RCPT"):
@@ -227,11 +272,11 @@ func (srv *fakeSMTPServer) serveCommands(reader *bufio.Reader, writer *bufio.Wri
 		upper := strings.ToUpper(cmd)
 		switch {
 		case strings.HasPrefix(upper, "EHLO"), strings.HasPrefix(upper, "HELO"):
-			if !(writeLine("250-fake.test") && writeLine("250-AUTH PLAIN LOGIN") && writeLine("250 8BITMIME")) {
+			if !(writeLine("250-fake.test") && writeLine(srv.authAdvertLine()) && writeLine("250 8BITMIME")) {
 				return
 			}
 		case strings.HasPrefix(upper, "AUTH"):
-			if !writeLine("235 2.7.0 authentication successful") {
+			if !srv.handleAuthLine(reader, writeLine, upper) {
 				return
 			}
 		case strings.HasPrefix(upper, "MAIL"), strings.HasPrefix(upper, "RCPT"):
@@ -376,6 +421,38 @@ func TestSendEmailWithConfigImplicitTLS(t *testing.T) {
 	err := svc.SendEmailWithConfig(smtpTestConfig(port, true), "rcpt@example.com", "subject", "<p>body</p>")
 	if err != nil {
 		t.Fatalf("expected send via implicit TLS to succeed, got: %v", err)
+	}
+	if !srv.sawCommand("DATA") {
+		t.Fatal("expected send path to reach DATA")
+	}
+}
+
+// Outlook.com 等只广告 LOGIN 的服务器：不得发 PLAIN，必须回退 LOGIN 并测试成功。
+func TestSMTPConnectionFallsBackToLoginWhenPlainUnsupported(t *testing.T) {
+	srv, port := startFakeSMTPServer(t, true, false, withLoginOnlyAuth())
+	svc := &EmailService{}
+
+	if err := svc.TestSMTPConnectionWithConfig(smtpTestConfig(port, true)); err != nil {
+		t.Fatalf("expected AUTH LOGIN fallback to succeed, got: %v", err)
+	}
+	if !srv.sawCommand("AUTH LOGIN") {
+		t.Fatal("expected client to use AUTH LOGIN when PLAIN is not advertised")
+	}
+	if srv.sawCommand("AUTH PLAIN") {
+		t.Fatal("client must not send AUTH PLAIN to a LOGIN-only server")
+	}
+}
+
+// 发送路径在 587 STARTTLS 后同样回退 LOGIN 并走完 MAIL/RCPT/DATA。
+func TestSendEmailWithConfigLoginFallback(t *testing.T) {
+	srv, port := startFakeSMTPServer(t, false, true, withLoginOnlyAuth())
+	svc := &EmailService{}
+
+	if err := svc.SendEmailWithConfig(smtpTestConfig(port, true), "rcpt@example.com", "subject", "<p>body</p>"); err != nil {
+		t.Fatalf("expected send with AUTH LOGIN fallback to succeed, got: %v", err)
+	}
+	if !srv.sawCommand("AUTH LOGIN") {
+		t.Fatal("expected send path to use AUTH LOGIN")
 	}
 	if !srv.sawCommand("DATA") {
 		t.Fatal("expected send path to reach DATA")
