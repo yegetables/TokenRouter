@@ -199,7 +199,7 @@ func (s *EmailService) SendEmailWithConfig(config *SMTPConfig, to, subject, body
 	}
 	defer func() { _ = client.Close() }()
 
-	auth := newSMTPAuth(config.Host, config.Username, config.Password)
+	auth := smtp.PlainAuth("", config.Username, config.Password, config.Host)
 	if err = client.Auth(auth); err != nil {
 		return fmt.Errorf("smtp auth: %w", err)
 	}
@@ -292,55 +292,6 @@ func newSMTPClient(conn net.Conn, host string) (*smtp.Client, error) {
 		return nil, fmt.Errorf("new smtp client: %w", err)
 	}
 	return client, nil
-}
-
-// smtpAuth 按服务器广告的认证机制选择方式：优先 PLAIN（保持既有行为）；
-// 服务器不广告 PLAIN（如 Outlook/Exchange 只支持 LOGIN/XOAUTH2）时降级为 LOGIN。
-type smtpAuth struct {
-	host     string
-	username string
-	password string
-	login    bool
-}
-
-// newSMTPAuth 创建支持 PLAIN/LOGIN 自适应的 SMTP 认证器。
-func newSMTPAuth(host, username, password string) smtp.Auth {
-	return &smtpAuth{host: host, username: username, password: password}
-}
-
-func (a *smtpAuth) Start(server *smtp.ServerInfo) (string, []byte, error) {
-	for _, mech := range server.Auth {
-		if strings.EqualFold(mech, "PLAIN") {
-			a.login = false
-			return smtp.PlainAuth("", a.username, a.password, a.host).Start(server)
-		}
-	}
-	// 服务器不支持 PLAIN，改用 LOGIN；仍拒绝向非本机的明文连接发送凭据，
-	// 与 net/smtp.PlainAuth 的安全约束保持一致。
-	if !server.TLS && !isSMTPLocalhost(server.Name) {
-		return "", nil, errors.New("unencrypted connection")
-	}
-	a.login = true
-	return "LOGIN", nil, nil
-}
-
-func (a *smtpAuth) Next(fromServer []byte, more bool) ([]byte, error) {
-	if !more || !a.login {
-		return nil, nil
-	}
-	switch strings.ToLower(strings.TrimSpace(string(fromServer))) {
-	case "username:", "user name:":
-		return []byte(a.username), nil
-	case "password:":
-		return []byte(a.password), nil
-	default:
-		return nil, fmt.Errorf("smtp: unexpected LOGIN challenge %q", fromServer)
-	}
-}
-
-// isSMTPLocalhost 与 net/smtp 的明文凭据豁免规则一致。
-func isSMTPLocalhost(name string) bool {
-	return name == "localhost" || name == "127.0.0.1" || name == "::1"
 }
 
 // GenerateVerifyCode 生成6位数字验证码
@@ -499,7 +450,7 @@ func (s *EmailService) TestSMTPConnectionWithConfig(config *SMTPConfig) error {
 	}
 	defer func() { _ = client.Close() }()
 
-	auth := newSMTPAuth(config.Host, config.Username, config.Password)
+	auth := smtp.PlainAuth("", config.Username, config.Password, config.Host)
 	if err := client.Auth(auth); err != nil {
 		return fmt.Errorf("smtp authentication failed: %w", err)
 	}
