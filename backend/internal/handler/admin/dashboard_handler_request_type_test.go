@@ -19,6 +19,7 @@ type dashboardUsageRepoCapture struct {
 	trendStream      *bool
 	modelRequestType *int16
 	modelStream      *bool
+	modelStart       time.Time
 	rankingLimit     int
 	ranking          []usagestats.UserSpendingRankingItem
 	rankingTotal     float64
@@ -49,6 +50,7 @@ func (s *dashboardUsageRepoCapture) GetModelStatsWithFilters(
 ) ([]usagestats.ModelStat, error) {
 	s.modelRequestType = requestType
 	s.modelStream = stream
+	s.modelStart = startTime
 	return []usagestats.ModelStat{}, nil
 }
 
@@ -154,6 +156,30 @@ func TestDashboardModelStatsInvalidModelSource(t *testing.T) {
 	router := newDashboardRequestTypeTestRouter(repo)
 
 	req := httptest.NewRequest(http.MethodGet, "/admin/dashboard/models?model_source=invalid", nil)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusBadRequest, rec.Code)
+}
+
+func TestDashboardModelStatsAllTimeUsesZeroStart(t *testing.T) {
+	repo := &dashboardUsageRepoCapture{}
+	router := newDashboardRequestTypeTestRouter(repo)
+
+	req := httptest.NewRequest(http.MethodGet, "/admin/dashboard/models?start_date=2026-03-01&end_date=2026-03-02&all_time=true", nil)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	// 部署后累计：起始时间退化为零值以覆盖全部历史。
+	require.True(t, repo.modelStart.IsZero())
+}
+
+func TestDashboardModelStatsRejectsInvalidAllTime(t *testing.T) {
+	repo := &dashboardUsageRepoCapture{}
+	router := newDashboardRequestTypeTestRouter(repo)
+
+	req := httptest.NewRequest(http.MethodGet, "/admin/dashboard/models?all_time=bad", nil)
 	rec := httptest.NewRecorder()
 	router.ServeHTTP(rec, req)
 

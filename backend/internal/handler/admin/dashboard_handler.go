@@ -249,6 +249,13 @@ func (h *DashboardHandler) GetUsageTrend(c *gin.Context) {
 // Query params: start_date, end_date (YYYY-MM-DD), user_id, api_key_id, account_id, group_id, request_type, stream, billing_type
 func (h *DashboardHandler) GetModelStats(c *gin.Context) {
 	startTime, endTime := parseTimeRange(c)
+	if allTime, boolErr := parseOptionalBoolDashboardFilter(c, "all_time"); boolErr != nil {
+		response.BadRequest(c, boolErr.Error())
+		return
+	} else if allTime != nil && *allTime {
+		// 部署后累计：忽略时间窗，聚合全部历史。
+		startTime = time.Time{}
+	}
 
 	// Parse optional filter params
 	var userID, apiKeyID, accountID, groupID, teamID int64

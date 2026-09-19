@@ -91,6 +91,8 @@ export interface ModelStatsParams {
   stream?: boolean
   billing_type?: number | null
   native_compaction_v2?: boolean | null
+  /** 忽略时间窗，聚合全部历史（部署后累计）。 */
+  all_time?: boolean
 }
 
 export interface ModelStatsResponse {

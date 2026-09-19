@@ -66,6 +66,13 @@
           <TokenUsageTrend :trend-data="trendData" :loading="chartsLoading" :granularity="granularity" />
         </div>
       </div>
+
+      <!-- 用量与缓存（部署后累计）：不选用户看全站，选中用户看该用户 -->
+      <ModelUsageCacheTable
+        :models="lifetimeModelStats"
+        :loading="lifetimeModelStatsLoading"
+      />
+
       <!-- 标签和筛选保留在同一卡片，数据内容使用下方独立卡片。 -->
       <div class="card" data-testid="admin-usage-filters-card">
         <div class="flex flex-wrap items-center border-b border-gray-200 px-2 dark:border-dark-700 sm:px-4">
@@ -210,7 +217,7 @@ import OpsErrorLogTable from '@/views/admin/ops/components/OpsErrorLogTable.vue'
 import OpsErrorDetailModal from '@/views/admin/ops/components/OpsErrorDetailModal.vue'
 import { listErrorLogs } from '@/api/admin/ops'
 import type { OpsErrorLog } from '@/api/admin/ops'
-import ModelDistributionChart from '@/components/charts/ModelDistributionChart.vue'; import GroupDistributionChart from '@/components/charts/GroupDistributionChart.vue'; import TokenUsageTrend from '@/components/charts/TokenUsageTrend.vue'
+import ModelDistributionChart from '@/components/charts/ModelDistributionChart.vue'; import GroupDistributionChart from '@/components/charts/GroupDistributionChart.vue'; import TokenUsageTrend from '@/components/charts/TokenUsageTrend.vue'; import ModelUsageCacheTable from '@/components/admin/usage/ModelUsageCacheTable.vue'
 import EndpointDistributionChart from '@/components/charts/EndpointDistributionChart.vue'
 import Icon from '@/components/icons/Icon.vue'
 import type { AdminUsageLog, TrendDataPoint, ModelStat, GroupStat, EndpointStat, AdminUser } from '@/types'; import type { AdminUsageStatsResponse, AdminUsageQueryParams } from '@/api/admin/usage'
@@ -223,6 +230,8 @@ type ModelDistributionSource = 'requested' | 'upstream' | 'mapping'
 const route = useRoute()
 const usageStats = ref<AdminUsageStatsResponse | null>(null); const usageLogs = ref<AdminUsageLog[]>([]); const loading = ref(false); const exporting = ref(false)
 const trendData = ref<TrendDataPoint[]>([]); const requestedModelStats = ref<ModelStat[]>([]); const upstreamModelStats = ref<ModelStat[]>([]); const mappingModelStats = ref<ModelStat[]>([]); const groupStats = ref<GroupStat[]>([]); const chartsLoading = ref(false); const modelStatsLoading = ref(false); const granularity = ref<'day' | 'hour'>('hour')
+// 部署后累计：全站（或按用户筛选后）的按模型累计用量与缓存率。
+const lifetimeModelStats = ref<ModelStat[]>([]); const lifetimeModelStatsLoading = ref(false)
 const modelDistributionMetric = ref<DistributionMetric>('tokens')
 const modelDistributionSource = ref<ModelDistributionSource>('requested')
 const loadedModelSources = reactive<Record<ModelDistributionSource, boolean>>({
@@ -500,6 +509,23 @@ const loadModelStats = async (source: ModelDistributionSource, force = false) =>
   }
 }
 
+// 部署后累计：忽略时间窗，按当前筛选（含用户筛选）聚合全部历史。
+const loadLifetimeModelStats = async () => {
+  lifetimeModelStatsLoading.value = true
+  try {
+    const response = await adminAPI.dashboard.getModelStats({
+      ...breakdownFilters.value,
+      all_time: true,
+    })
+    lifetimeModelStats.value = response.models || []
+  } catch (error) {
+    console.error('Failed to load lifetime model stats:', error)
+    lifetimeModelStats.value = []
+  } finally {
+    lifetimeModelStatsLoading.value = false
+  }
+}
+
 const loadChartData = async () => {
   const seq = ++chartReqSeq
   chartsLoading.value = true
@@ -537,6 +563,7 @@ const applyFilters = () => {
   loadLogs()
   loadStats()
   loadModelStats(modelDistributionSource.value, true)
+  loadLifetimeModelStats()
   loadChartData()
   errPage.value = 1
   if (activeTab.value === 'errors') {
@@ -550,6 +577,7 @@ const refreshData = () => {
   loadLogs()
   loadStats(true)
   loadModelStats(modelDistributionSource.value, true)
+  loadLifetimeModelStats()
   loadChartData()
   if (activeTab.value === 'errors') loadAdminErrors()
   if (rankingMounted.value) rankingRef.value?.reload()
@@ -908,6 +936,7 @@ onMounted(() => {
   loadLogs()
   loadStats()
   loadModelStats(modelDistributionSource.value, true)
+  loadLifetimeModelStats()
   window.setTimeout(() => {
     void loadChartData()
   }, 120)
