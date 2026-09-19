@@ -410,9 +410,11 @@ type AccountUsageSummary struct {
 
 // AccountUsageStatsResponse represents the full usage statistics response for an account
 type AccountUsageStatsResponse struct {
-	History           []AccountUsageHistory `json:"history"`
-	Summary           AccountUsageSummary   `json:"summary"`
-	Models            []ModelStat           `json:"models"`
-	Endpoints         []EndpointStat        `json:"endpoints"`
-	UpstreamEndpoints []EndpointStat        `json:"upstream_endpoints"`
+	History []AccountUsageHistory `json:"history"`
+	Summary AccountUsageSummary   `json:"summary"`
+	Models  []ModelStat           `json:"models"`
+	// LifetimeModels 是该账号部署后全量历史的按模型累计用量，不受查询时间窗影响。
+	LifetimeModels    []ModelStat    `json:"lifetime_models"`
+	Endpoints         []EndpointStat `json:"endpoints"`
+	UpstreamEndpoints []EndpointStat `json:"upstream_endpoints"`
 }

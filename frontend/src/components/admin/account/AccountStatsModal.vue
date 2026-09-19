@@ -417,6 +417,14 @@
         <!-- Model Distribution -->
         <ModelDistributionChart :model-stats="stats.models" :loading="false" />
 
+        <!-- 用量与缓存（部署后累计）：账号全量历史，额度取账号口径成本 -->
+        <ModelUsageCacheTable
+          :models="stats.lifetime_models || []"
+          :loading="false"
+          quota-field="account_cost"
+          quota-unit="usd"
+        />
+
         <EndpointDistributionChart
           :endpoint-stats="stats.endpoints || []"
           :loading="false"
@@ -471,6 +479,7 @@ import { Line } from 'vue-chartjs'
 import BaseDialog from '@/components/common/BaseDialog.vue'
 import LoadingSpinner from '@/components/common/LoadingSpinner.vue'
 import ModelDistributionChart from '@/components/charts/ModelDistributionChart.vue'
+import ModelUsageCacheTable from '@/components/admin/usage/ModelUsageCacheTable.vue'
 import EndpointDistributionChart from '@/components/charts/EndpointDistributionChart.vue'
 import BalanceIcon from '@/components/common/BalanceIcon.vue'
 import Icon from '@/components/icons/Icon.vue'

@@ -17,15 +17,17 @@ import (
 
 type userUsageRepoCapture struct {
 	service.UsageLogRepository
-	listParams   pagination.PaginationParams
-	listFilters  usagestats.UsageLogFilters
-	statsFilters usagestats.UsageLogFilters
-	trendFilters usagestats.UsageLogFilters
-	groupFilters usagestats.UsageLogFilters
-	listRows     []service.UsageLog
-	stats        *usagestats.UsageStats
-	modelStats   []usagestats.ModelStat
-	groupStats   []usagestats.GroupStat
+	listParams      pagination.PaginationParams
+	listFilters     usagestats.UsageLogFilters
+	statsFilters    usagestats.UsageLogFilters
+	trendFilters    usagestats.UsageLogFilters
+	groupFilters    usagestats.UsageLogFilters
+	listRows        []service.UsageLog
+	stats           *usagestats.UsageStats
+	modelStats      []usagestats.ModelStat
+	modelStatsStart time.Time
+	modelStatsEnd   time.Time
+	groupStats      []usagestats.GroupStat
 }
 
 func (s *userUsageRepoCapture) ListWithFilters(ctx context.Context, params pagination.PaginationParams, filters usagestats.UsageLogFilters) ([]service.UsageLog, *pagination.PaginationResult, error) {
@@ -67,6 +69,8 @@ func (s *userUsageRepoCapture) GetUsageTrendWithUsageFilters(_ context.Context, 
 }
 
 func (s *userUsageRepoCapture) GetModelStatsWithFilters(ctx context.Context, startTime, endTime time.Time, userID, apiKeyID, accountID, groupID int64, requestType *int16, stream *bool, billingType *int8) ([]usagestats.ModelStat, error) {
+	s.modelStatsStart = startTime
+	s.modelStatsEnd = endTime
 	return s.modelStats, nil
 }
 
@@ -338,6 +342,31 @@ func TestUserUsageDashboardModelsOmitsAccountCost(t *testing.T) {
 	require.Contains(t, body, `"cost":0.1`)
 	require.Contains(t, body, `"actual_cost":0.08`)
 	require.NotContains(t, body, "account_cost")
+}
+
+func TestUserUsageDashboardModelsAllTimeUsesZeroStart(t *testing.T) {
+	repo := &userUsageRepoCapture{}
+	router := newUserUsageRequestTypeTestRouter(repo)
+
+	req := httptest.NewRequest(http.MethodGet, "/usage/dashboard/models?start_date=2026-03-01&end_date=2026-03-02&all_time=true", nil)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	// 部署后累计：起始时间退化为零值以覆盖全部历史，结束边界仍沿用请求范围。
+	require.True(t, repo.modelStatsStart.IsZero())
+	require.False(t, repo.modelStatsEnd.IsZero())
+}
+
+func TestUserUsageDashboardModelsRejectsInvalidAllTime(t *testing.T) {
+	repo := &userUsageRepoCapture{}
+	router := newUserUsageRequestTypeTestRouter(repo)
+
+	req := httptest.NewRequest(http.MethodGet, "/usage/dashboard/models?all_time=bad", nil)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusBadRequest, rec.Code)
 }
 
 func TestUserUsageDashboardModelsRejectsAdminModelSources(t *testing.T) {

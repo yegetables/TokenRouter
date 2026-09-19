@@ -1201,6 +1201,12 @@ func (r *usageLogRepository) GetAccountUsageStats(ctx context.Context, accountID
 	if err != nil {
 		models = []ModelStat{}
 	}
+	// 部署后累计：不受查询时间窗影响的账号全量按模型用量，供「用量与缓存」表展示。
+	lifetimeModels, lifetimeErr := r.GetModelStatsWithFilters(ctx, time.Time{}, endTime, 0, 0, accountID, 0, nil, nil, nil)
+	if lifetimeErr != nil {
+		logger.LegacyPrintf("repository.usage_log", "GetModelStatsWithFilters(lifetime) failed in GetAccountUsageStats: %v", lifetimeErr)
+		lifetimeModels = []ModelStat{}
+	}
 	endpoints, endpointErr := r.GetEndpointStatsWithFilters(ctx, startTime, endTime, 0, 0, accountID, 0, "", nil, nil, nil)
 	if endpointErr != nil {
 		logger.LegacyPrintf("repository.usage_log", "GetEndpointStatsWithFilters failed in GetAccountUsageStats: %v", endpointErr)
@@ -1216,6 +1222,7 @@ func (r *usageLogRepository) GetAccountUsageStats(ctx context.Context, accountID
 		History:           history,
 		Summary:           summary,
 		Models:            models,
+		LifetimeModels:    lifetimeModels,
 		Endpoints:         endpoints,
 		UpstreamEndpoints: upstreamEndpoints,
 	}

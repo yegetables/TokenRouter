@@ -336,6 +336,8 @@ export async function getDashboardModels(params?: {
   billing_mode?: string | null
   native_compaction_v2?: boolean | null
   timezone?: string
+  /** 忽略时间窗，聚合全部历史（部署后累计）。 */
+  all_time?: boolean
 }): Promise<ModelStatsResponse> {
   const { data } = await apiClient.get<ModelStatsResponse>('/usage/dashboard/models', { params })
   return data

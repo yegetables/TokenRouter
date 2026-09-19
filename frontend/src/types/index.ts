@@ -2524,6 +2524,8 @@ export interface AccountUsageStatsResponse {
   history: AccountUsageHistory[]
   summary: AccountUsageSummary
   models: ModelStat[]
+  /** 部署后全量历史的按模型累计用量，不受查询时间窗影响。 */
+  lifetime_models?: ModelStat[]
   endpoints: EndpointStat[]
   upstream_endpoints: EndpointStat[]
 }
