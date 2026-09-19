@@ -151,8 +151,9 @@ describe('ModelDistributionChart', () => {
     })
 
     expect(wrapper.text()).not.toContain('Account Cost')
-    expect(wrapper.findAll('thead th')).toHaveLength(5)
-    expect(wrapper.findAll('tbody tr')[0].findAll('td')).toHaveLength(5)
+    // 列：模型、请求、Token、缓存率、实际、标准（无账号成本）
+    expect(wrapper.findAll('thead th')).toHaveLength(6)
+    expect(wrapper.findAll('tbody tr')[0].findAll('td')).toHaveLength(6)
   })
 
   it('uses the dashboard user label policy and renders Others with a dedicated chart color', async () => {

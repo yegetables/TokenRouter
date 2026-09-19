@@ -67,10 +67,10 @@
         </div>
       </div>
 
-      <!-- 用量与缓存（部署后累计）：不选用户看全站，选中用户看该用户 -->
+      <!-- 用量与缓存：跟随页面时间范围；不选用户看全站，选中用户看该用户 -->
       <ModelUsageCacheTable
-        :models="lifetimeModelStats"
-        :loading="lifetimeModelStatsLoading"
+        :models="requestedModelStats"
+        :loading="modelStatsLoading"
       />
 
       <!-- 标签和筛选保留在同一卡片，数据内容使用下方独立卡片。 -->
@@ -231,7 +231,7 @@ const route = useRoute()
 const usageStats = ref<AdminUsageStatsResponse | null>(null); const usageLogs = ref<AdminUsageLog[]>([]); const loading = ref(false); const exporting = ref(false)
 const trendData = ref<TrendDataPoint[]>([]); const requestedModelStats = ref<ModelStat[]>([]); const upstreamModelStats = ref<ModelStat[]>([]); const mappingModelStats = ref<ModelStat[]>([]); const groupStats = ref<GroupStat[]>([]); const chartsLoading = ref(false); const modelStatsLoading = ref(false); const granularity = ref<'day' | 'hour'>('hour')
 // 部署后累计：全站（或按用户筛选后）的按模型累计用量与缓存率。
-const lifetimeModelStats = ref<ModelStat[]>([]); const lifetimeModelStatsLoading = ref(false)
+
 const modelDistributionMetric = ref<DistributionMetric>('tokens')
 const modelDistributionSource = ref<ModelDistributionSource>('requested')
 const loadedModelSources = reactive<Record<ModelDistributionSource, boolean>>({
@@ -509,23 +509,6 @@ const loadModelStats = async (source: ModelDistributionSource, force = false) =>
   }
 }
 
-// 部署后累计：忽略时间窗，按当前筛选（含用户筛选）聚合全部历史。
-const loadLifetimeModelStats = async () => {
-  lifetimeModelStatsLoading.value = true
-  try {
-    const response = await adminAPI.dashboard.getModelStats({
-      ...breakdownFilters.value,
-      all_time: true,
-    })
-    lifetimeModelStats.value = response.models || []
-  } catch (error) {
-    console.error('Failed to load lifetime model stats:', error)
-    lifetimeModelStats.value = []
-  } finally {
-    lifetimeModelStatsLoading.value = false
-  }
-}
-
 const loadChartData = async () => {
   const seq = ++chartReqSeq
   chartsLoading.value = true
@@ -563,7 +546,6 @@ const applyFilters = () => {
   loadLogs()
   loadStats()
   loadModelStats(modelDistributionSource.value, true)
-  loadLifetimeModelStats()
   loadChartData()
   errPage.value = 1
   if (activeTab.value === 'errors') {
@@ -577,7 +559,6 @@ const refreshData = () => {
   loadLogs()
   loadStats(true)
   loadModelStats(modelDistributionSource.value, true)
-  loadLifetimeModelStats()
   loadChartData()
   if (activeTab.value === 'errors') loadAdminErrors()
   if (rankingMounted.value) rankingRef.value?.reload()
@@ -936,7 +917,6 @@ onMounted(() => {
   loadLogs()
   loadStats()
   loadModelStats(modelDistributionSource.value, true)
-  loadLifetimeModelStats()
   window.setTimeout(() => {
     void loadChartData()
   }, 120)

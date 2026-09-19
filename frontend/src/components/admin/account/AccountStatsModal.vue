@@ -417,9 +417,9 @@
         <!-- Model Distribution -->
         <ModelDistributionChart :model-stats="stats.models" :loading="false" />
 
-        <!-- 用量与缓存（部署后累计）：账号全量历史，额度取账号口径成本 -->
+        <!-- 用量与缓存：跟随弹窗时间范围，额度取账号口径成本 -->
         <ModelUsageCacheTable
-          :models="stats.lifetime_models || []"
+          :models="stats.models"
           :loading="false"
           quota-field="account_cost"
           quota-unit="usd"

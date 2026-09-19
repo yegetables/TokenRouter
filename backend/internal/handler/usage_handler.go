@@ -663,16 +663,7 @@ func (h *UsageHandler) DashboardModels(c *gin.Context) {
 		return
 	}
 
-	// all_time=true 表示「部署后累计」：忽略时间窗，聚合当前用户全部历史，
-	// 身份、Key、分组等非时间过滤条件仍然生效。
-	startTime := parsed.StartTime
-	if allTime, ok := parseBoolQueryWithDefault(c, "all_time", false); !ok {
-		return
-	} else if allTime {
-		startTime = time.Time{}
-	}
-
-	stats, err := h.usageService.GetModelStatsWithFiltersBySource(c.Request.Context(), startTime, parsed.EndTime, parsed.Filters, usagestats.ModelSourceRequested)
+	stats, err := h.usageService.GetModelStatsWithFiltersBySource(c.Request.Context(), parsed.StartTime, parsed.EndTime, parsed.Filters, usagestats.ModelSourceRequested)
 	if err != nil {
 		response.ErrorFrom(c, err)
 		return

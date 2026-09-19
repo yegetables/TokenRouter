@@ -37,7 +37,8 @@
                 <span class="flex items-center justify-between gap-3">
                   <span>{{ t('usage.cacheCreationTokensLabel') }}</span>
                   <span class="tabular-nums">
-                    {{ formatTokens(stats?.total_cache_creation_tokens || 0) }}
+                    <template v-if="hasCreationData">{{ formatTokens(stats?.total_cache_creation_tokens || 0) }}</template>
+                    <template v-else>{{ t('usage.modelUsageCache.notApplicable') }}</template>
                   </span>
                 </span>
                 <span class="mt-1 flex items-center justify-between gap-3">
@@ -46,6 +47,26 @@
                     {{ formatTokens(stats?.total_cache_read_tokens || 0) }}
                   </span>
                 </span>
+                <span v-if="cacheHitRate !== null" class="mt-2 flex items-center justify-between gap-3 border-t border-gray-100 pt-2 dark:border-dark-700">
+                  <span>{{ t('usage.modelUsageCache.cacheRate') }}</span>
+                  <span class="tabular-nums font-medium text-gray-900 dark:text-white">
+                    {{ cacheHitRate.toFixed(1) }}%
+                  </span>
+                </span>
+              </span>
+            </span>
+            <!-- 命中率直接展示在卡片上，不折叠进 tooltip -->
+            <span
+              v-if="cacheHitRate !== null"
+              class="hint group relative inline-flex cursor-help items-center gap-0.5 whitespace-nowrap text-gray-400 dark:text-gray-500"
+              tabindex="0"
+            >
+              {{ t('usage.modelUsageCache.cacheRate') }} {{ cacheHitRate.toFixed(1) }}%
+              <Icon name="infoCircle" size="xs" class="text-gray-400" :stroke-width="2" />
+              <span
+                class="pointer-events-none absolute left-1/2 top-full z-30 mt-2 hidden w-64 -translate-x-1/2 rounded-lg border border-gray-200 bg-white p-3 text-left text-xs font-normal text-gray-700 shadow-lg group-hover:block group-focus:block dark:border-dark-600 dark:bg-dark-800 dark:text-dark-200"
+              >
+                {{ t('usage.modelUsageCache.aggregateHint') }}
               </span>
             </span>
           </p>
@@ -70,6 +91,8 @@
               {{ t('usage.standardCost') }}
               <span :class="{ 'line-through': strikeStandardCost }">{{ formatUsdAmount(stats?.total_cost || 0, { fractionDigits: 4 }) }}</span>
             </span>
+            <!-- 实扣用站点余额单位、成本/标准固定 USD，口径不同，这里给出口径说明 -->
+            <HelpTooltip :content="t('admin.dashboard.standardUnitHint')" :closable="false" width-class="w-64" />
           </div>
         </div>
       </div>
@@ -93,9 +116,11 @@ import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { AdminUsageStatsResponse } from '@/api/admin/usage'
 import BalanceIcon from '@/components/common/BalanceIcon.vue'
+import HelpTooltip from '@/components/common/HelpTooltip.vue'
 import type { UsageStatsResponse } from '@/types'
 import Icon from '@/components/icons/Icon.vue'
 import { useBalanceDisplay } from '@/composables/useBalanceDisplay'
+import { computeCacheHitRate, hasCacheCreationData } from '@/utils/cacheHitRate'
 
 const props = withDefaults(defineProps<{
   stats: (AdminUsageStatsResponse | UsageStatsResponse) | null
@@ -131,4 +156,16 @@ const formatTokens = (value: number) => {
 
 const cacheLabel = () => t('usage.cacheTotal')
 const cacheDetailLabel = () => t('usage.cacheBreakdown')
+
+// 上游不回报缓存写入时，明细里显示"不适用"，避免看起来像故障性的 0。
+const hasCreationData = computed(() => hasCacheCreationData(props.stats?.total_cache_creation_tokens || 0))
+
+// 分母为 0 时返回 null，卡片上不显示命中率而不是显示 0%。
+const cacheHitRate = computed(() =>
+  computeCacheHitRate(
+    props.stats?.total_input_tokens || 0,
+    props.stats?.total_cache_creation_tokens || 0,
+    props.stats?.total_cache_read_tokens || 0,
+  )
+)
 </script>

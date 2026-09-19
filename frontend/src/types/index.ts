@@ -2259,6 +2259,10 @@ export interface UserBreakdownItem {
   input_tokens: number
   output_tokens: number
   cache_tokens: number
+  /** 缓存创建 token；多数上游不回报时恒为 0。 */
+  cache_creation_tokens?: number
+  /** 缓存读取 token，用于计算缓存命中率。 */
+  cache_read_tokens?: number
   total_tokens: number
   cost: number
   actual_cost: number
@@ -2524,8 +2528,6 @@ export interface AccountUsageStatsResponse {
   history: AccountUsageHistory[]
   summary: AccountUsageSummary
   models: ModelStat[]
-  /** 部署后全量历史的按模型累计用量，不受查询时间窗影响。 */
-  lifetime_models?: ModelStat[]
   endpoints: EndpointStat[]
   upstream_endpoints: EndpointStat[]
 }

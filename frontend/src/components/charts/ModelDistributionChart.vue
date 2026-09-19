@@ -113,9 +113,25 @@
               <th class="pb-2 text-left">{{ t('admin.dashboard.model') }}</th>
               <th class="pb-2 text-right">{{ t('admin.dashboard.requests') }}</th>
               <th class="pb-2 text-right">{{ t('admin.dashboard.tokens') }}</th>
-              <th class="pb-2 text-right">{{ t('admin.dashboard.actual') }}</th>
-              <th v-if="showAccountCost" class="pb-2 text-right">{{ t('admin.dashboard.accountCost') }}</th>
-              <th v-if="showStandardCost" class="pb-2 text-right">{{ t('admin.dashboard.standard') }}</th>
+              <th class="pb-2 text-right">{{ t('usage.modelUsageCache.cacheRate') }}</th>
+              <th class="pb-2 text-right">
+                <span class="inline-flex items-center justify-end gap-0.5">
+                  {{ t('admin.dashboard.actual') }}
+                  <HelpTooltip :content="t('admin.dashboard.actualUnitHint')" :closable="false" width-class="w-64" />
+                </span>
+              </th>
+              <th v-if="showAccountCost" class="pb-2 text-right">
+                <span class="inline-flex items-center justify-end gap-0.5">
+                  {{ t('admin.dashboard.accountCost') }}
+                  <HelpTooltip :content="t('admin.dashboard.accountUnitHint')" :closable="false" width-class="w-64" />
+                </span>
+              </th>
+              <th v-if="showStandardCost" class="pb-2 text-right">
+                <span class="inline-flex items-center justify-end gap-0.5">
+                  {{ t('admin.dashboard.standard') }}
+                  <HelpTooltip :content="t('admin.dashboard.standardUnitHint')" :closable="false" width-class="w-64" />
+                </span>
+              </th>
             </tr>
           </thead>
           <tbody>
@@ -141,6 +157,10 @@
                 </td>
                 <td class="py-1.5 text-right text-gray-600 dark:text-gray-400">
                   {{ formatTokens(model.total_tokens) }}
+                </td>
+                <td class="py-1.5 text-right text-gray-600 dark:text-gray-400">
+                  <span v-if="modelCacheHitRate(model) === null" class="text-gray-400 dark:text-gray-500">{{ t('usage.modelUsageCache.notApplicable') }}</span>
+                  <span v-else>{{ modelCacheHitRate(model)!.toFixed(1) }}%</span>
                 </td>
                 <td class="py-1.5 text-right text-green-600 dark:text-green-400">
                   {{ balanceUnitSymbol }}{{ formatCost(model.actual_cost) }}
@@ -250,9 +270,11 @@ import { useI18n } from 'vue-i18n'
 import { Chart as ChartJS, ArcElement, Tooltip, Legend } from 'chart.js'
 import { Doughnut } from 'vue-chartjs'
 import LoadingSpinner from '@/components/common/LoadingSpinner.vue'
+import HelpTooltip from '@/components/common/HelpTooltip.vue'
 import { useBalanceDisplay } from '@/composables/useBalanceDisplay'
 import UserBreakdownSubTable from './UserBreakdownSubTable.vue'
 import { toLogarithmicDisplayValues } from '@/utils/chartDisplayScale'
+import { computeCacheHitRate } from '@/utils/cacheHitRate'
 import { externalTooltipHandler, hideExternalTooltip } from '@/utils/chartExternalTooltip'
 import type { ModelStat, UserSpendingRankingItem, UserBreakdownItem } from '@/types'
 import { getUserBreakdown } from '@/api/admin/dashboard'
@@ -347,7 +369,8 @@ const emit = defineEmits<{
 const enableRankingView = computed(() => props.enableRankingView)
 const showAccountCost = computed(() => props.showAccountCost)
 const showStandardCost = computed(() => props.showStandardCost)
-const distributionColspan = computed(() => 4 + (showAccountCost.value ? 1 : 0) + (showStandardCost.value ? 1 : 0))
+// 列：模型、请求、Token、缓存率、实际、成本、标准
+const distributionColspan = computed(() => 5 + (showAccountCost.value ? 1 : 0) + (showStandardCost.value ? 1 : 0))
 const activeView = ref<'model_distribution' | 'spending_ranking'>('model_distribution')
 
 const chartColors = [
@@ -364,6 +387,10 @@ const chartColors = [
   '#06b6d4',
   '#a855f7'
 ]
+
+// 每行模型的缓存命中率；无缓存数据返回 null，显示"不适用"。
+const modelCacheHitRate = (model: ModelStat): number | null =>
+  computeCacheHitRate(model.input_tokens, model.cache_creation_tokens, model.cache_read_tokens)
 
 const displayModelStats = computed(() => {
   const sourceStats = props.source === 'upstream'

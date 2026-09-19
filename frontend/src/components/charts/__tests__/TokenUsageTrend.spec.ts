@@ -74,7 +74,7 @@ describe('TokenUsageTrend', () => {
     expect(hitRateDataset.borderDash).toBeUndefined()
   })
 
-  it('returns 0 hit rate when all prompt tokens are zero', () => {
+  it('breaks the line instead of plotting 0% when there is no traffic', () => {
     const wrapper = mount(TokenUsageTrend, {
       props: {
         trendData: [
@@ -101,7 +101,9 @@ describe('TokenUsageTrend', () => {
     const hitRateDataset = chartData.datasets.find(
       (ds: any) => ds.label === 'Cached Input %'
     )
-    expect(hitRateDataset.data[0]).toBe(0)
+    // 无流量不是"未命中"：该点必须为 null 让曲线断开，不能画成 0%。
+    expect(hitRateDataset.data[0]).toBeNull()
+    expect(hitRateDataset.spanGaps).toBe(false)
   })
 
   it('includes cache_creation_tokens in denominator for Anthropic models', () => {

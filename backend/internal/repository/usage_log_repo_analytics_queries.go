@@ -592,6 +592,8 @@ func (r *usageLogRepository) getUserBreakdownStatsFromAnalytics(ctx context.Cont
 		       COALESCE(SUM(c.input_tokens), 0) AS input_tokens,
 		       COALESCE(SUM(c.output_tokens), 0) AS output_tokens,
 		       COALESCE(SUM(c.cache_creation_tokens + c.cache_read_tokens), 0) AS cache_tokens,
+		       COALESCE(SUM(c.cache_creation_tokens), 0) AS cache_creation_tokens,
+		       COALESCE(SUM(c.cache_read_tokens), 0) AS cache_read_tokens,
 		       COALESCE(SUM(c.input_tokens + c.output_tokens + c.cache_creation_tokens + c.cache_read_tokens), 0) AS total_tokens,
 		       COALESCE(SUM(c.total_cost), 0) AS cost,
 		       COALESCE(SUM(c.actual_cost), 0) AS actual_cost,
@@ -610,8 +612,9 @@ func (r *usageLogRepository) getUserBreakdownStatsFromAnalytics(ctx context.Cont
 		var row usagestats.UserBreakdownItem
 		if err := rows.Scan(
 			&row.UserID, &row.Email, &row.Requests, &row.InputTokens,
-			&row.OutputTokens, &row.CacheTokens, &row.TotalTokens,
-			&row.Cost, &row.ActualCost, &row.AccountCost,
+			&row.OutputTokens, &row.CacheTokens,
+			&row.CacheCreationTokens, &row.CacheReadTokens,
+			&row.TotalTokens, &row.Cost, &row.ActualCost, &row.AccountCost,
 		); err != nil {
 			return nil, false, err
 		}

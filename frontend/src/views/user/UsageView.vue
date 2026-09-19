@@ -78,10 +78,10 @@
         </div>
       </div>
 
-      <!-- 用量与缓存（部署后累计）：不受上方日期范围影响的全量历史 -->
+      <!-- 用量与缓存：跟随上方日期范围 -->
       <ModelUsageCacheTable
-        :models="lifetimeModelStats"
-        :loading="lifetimeModelStatsLoading"
+        :models="requestedModelStats"
+        :loading="modelStatsLoading"
       />
 
       <div class="card p-4">
@@ -307,7 +307,6 @@ const usageStats = ref<UsageStatsResponse | null>(null)
 const usageLogs = ref<UsageLog[]>([])
 const trendData = ref<TrendDataPoint[]>([])
 const requestedModelStats = ref<ModelStat[]>([])
-const lifetimeModelStats = ref<ModelStat[]>([])
 const groupStats = ref<GroupStat[]>([])
 const inboundEndpointStats = ref<EndpointStat[]>([])
 const upstreamEndpointStats = ref<EndpointStat[]>([])
@@ -319,7 +318,6 @@ const teamMemberSeries = ref<Array<{ userID: number; label: string; summary: Tea
 const loading = ref(false)
 const chartsLoading = ref(false)
 const modelStatsLoading = ref(false)
-const lifetimeModelStatsLoading = ref(false)
 const endpointStatsLoading = ref(false)
 const teamChartsLoading = ref(false)
 const exporting = ref(false)
@@ -563,23 +561,6 @@ const loadModelStats = async () => {
   }
 }
 
-// 部署后累计：不受页面日期范围影响，聚合当前用户全部历史。
-const loadLifetimeModelStats = async () => {
-  lifetimeModelStatsLoading.value = true
-  try {
-    const response = await usageAPI.getDashboardModels({
-      model_source: 'requested',
-      all_time: true,
-    })
-    lifetimeModelStats.value = response.models || []
-  } catch (error) {
-    console.error('Failed to load lifetime model stats:', error)
-    lifetimeModelStats.value = []
-  } finally {
-    lifetimeModelStatsLoading.value = false
-  }
-}
-
 const loadChartData = async () => {
   const seq = ++chartReqSeq
   chartsLoading.value = true
@@ -628,7 +609,6 @@ const refreshData = () => {
   void loadLogs()
   void loadStats()
   void loadModelStats()
-  void loadLifetimeModelStats()
   void loadChartData()
   void loadTeamMemberUsage()
   if (activeTab.value === 'errors') void loadErrors()

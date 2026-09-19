@@ -150,14 +150,19 @@ func TestGetUserBreakdownStatsRequestTypeIncludesLegacyFallback(t *testing.T) {
 		WithArgs(start, end, requestType).
 		WillReturnRows(sqlmock.NewRows([]string{
 			"user_id", "email", "requests", "input_tokens", "output_tokens",
-			"cache_tokens", "total_tokens", "cost", "actual_cost", "account_cost",
-		}))
+			"cache_tokens", "cache_creation_tokens", "cache_read_tokens",
+			"total_tokens", "cost", "actual_cost", "account_cost",
+		}).AddRow(7, "u@example.com", 3, 100, 40, 900, 0, 900, 1040, 1.5, 1.2, 1.1))
 
 	rows, err := repo.GetUserBreakdownStats(context.Background(), start, end, usagestats.UserBreakdownDimension{
 		RequestType: &requestType,
 	}, 0)
 
 	require.NoError(t, err)
-	require.Empty(t, rows)
+	require.Len(t, rows, 1)
+	// 缓存拆分用于计算命中率；多数上游不回报写入，creation 为 0 而 read 有值。
+	require.Equal(t, int64(900), rows[0].CacheCreationTokens+rows[0].CacheReadTokens)
+	require.Equal(t, int64(0), rows[0].CacheCreationTokens)
+	require.Equal(t, int64(900), rows[0].CacheReadTokens)
 	require.NoError(t, mock.ExpectationsWereMet())
 }

@@ -189,16 +189,20 @@ type UsageRankingResponse struct {
 
 // UserBreakdownItem represents per-user usage breakdown within a dimension (group, model, endpoint).
 type UserBreakdownItem struct {
-	UserID       int64   `json:"user_id"`
-	Email        string  `json:"email"`
-	Requests     int64   `json:"requests"`
-	InputTokens  int64   `json:"input_tokens"`  // 输入 token 累计
-	OutputTokens int64   `json:"output_tokens"` // 输出 token 累计
-	CacheTokens  int64   `json:"cache_tokens"`  // 缓存创建 + 读取 token 累计
-	TotalTokens  int64   `json:"total_tokens"`  // 输入+输出+缓存 token 累计
-	Cost         float64 `json:"cost"`          // 标准计费
-	ActualCost   float64 `json:"actual_cost"`   // 实际扣除
-	AccountCost  float64 `json:"account_cost"`  // 账号成本
+	UserID       int64  `json:"user_id"`
+	Email        string `json:"email"`
+	Requests     int64  `json:"requests"`
+	InputTokens  int64  `json:"input_tokens"`  // 输入 token 累计
+	OutputTokens int64  `json:"output_tokens"` // 输出 token 累计
+	CacheTokens  int64  `json:"cache_tokens"`  // 缓存创建 + 读取 token 累计
+	// CacheCreationTokens / CacheReadTokens 是 CacheTokens 的拆分，
+	// 用于计算缓存命中率；多数上游不回报缓存写入时创建值为 0。
+	CacheCreationTokens int64   `json:"cache_creation_tokens"`
+	CacheReadTokens     int64   `json:"cache_read_tokens"`
+	TotalTokens         int64   `json:"total_tokens"` // 输入+输出+缓存 token 累计
+	Cost                float64 `json:"cost"`         // 标准计费
+	ActualCost          float64 `json:"actual_cost"`  // 实际扣除
+	AccountCost         float64 `json:"account_cost"` // 账号成本
 }
 
 // UserBreakdownDimension specifies the dimension to filter for user breakdown.
@@ -410,11 +414,9 @@ type AccountUsageSummary struct {
 
 // AccountUsageStatsResponse represents the full usage statistics response for an account
 type AccountUsageStatsResponse struct {
-	History []AccountUsageHistory `json:"history"`
-	Summary AccountUsageSummary   `json:"summary"`
-	Models  []ModelStat           `json:"models"`
-	// LifetimeModels 是该账号部署后全量历史的按模型累计用量，不受查询时间窗影响。
-	LifetimeModels    []ModelStat    `json:"lifetime_models"`
-	Endpoints         []EndpointStat `json:"endpoints"`
-	UpstreamEndpoints []EndpointStat `json:"upstream_endpoints"`
+	History           []AccountUsageHistory `json:"history"`
+	Summary           AccountUsageSummary   `json:"summary"`
+	Models            []ModelStat           `json:"models"`
+	Endpoints         []EndpointStat        `json:"endpoints"`
+	UpstreamEndpoints []EndpointStat        `json:"upstream_endpoints"`
 }

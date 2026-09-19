@@ -344,29 +344,18 @@ func TestUserUsageDashboardModelsOmitsAccountCost(t *testing.T) {
 	require.NotContains(t, body, "account_cost")
 }
 
-func TestUserUsageDashboardModelsAllTimeUsesZeroStart(t *testing.T) {
+func TestUserUsageDashboardModelsFollowsTimeRange(t *testing.T) {
 	repo := &userUsageRepoCapture{}
 	router := newUserUsageRequestTypeTestRouter(repo)
 
-	req := httptest.NewRequest(http.MethodGet, "/usage/dashboard/models?start_date=2026-03-01&end_date=2026-03-02&all_time=true", nil)
+	req := httptest.NewRequest(http.MethodGet, "/usage/dashboard/models?start_date=2026-03-01&end_date=2026-03-02", nil)
 	rec := httptest.NewRecorder()
 	router.ServeHTTP(rec, req)
 
 	require.Equal(t, http.StatusOK, rec.Code)
-	// 部署后累计：起始时间退化为零值以覆盖全部历史，结束边界仍沿用请求范围。
-	require.True(t, repo.modelStatsStart.IsZero())
+	// 命中率与用量跟随页面时间范围，起始时间不得退化为零值。
+	require.False(t, repo.modelStatsStart.IsZero())
 	require.False(t, repo.modelStatsEnd.IsZero())
-}
-
-func TestUserUsageDashboardModelsRejectsInvalidAllTime(t *testing.T) {
-	repo := &userUsageRepoCapture{}
-	router := newUserUsageRequestTypeTestRouter(repo)
-
-	req := httptest.NewRequest(http.MethodGet, "/usage/dashboard/models?all_time=bad", nil)
-	rec := httptest.NewRecorder()
-	router.ServeHTTP(rec, req)
-
-	require.Equal(t, http.StatusBadRequest, rec.Code)
 }
 
 func TestUserUsageDashboardModelsRejectsAdminModelSources(t *testing.T) {

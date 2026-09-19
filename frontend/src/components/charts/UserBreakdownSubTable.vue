@@ -22,6 +22,10 @@
           <td class="py-1 text-right text-gray-500 dark:text-gray-400">
             {{ formatTokens(user.total_tokens) }}
           </td>
+          <td class="py-1 text-right text-gray-500 dark:text-gray-400">
+            <span v-if="cacheHitRate(user) === null" class="text-gray-400 dark:text-gray-600">{{ t('usage.modelUsageCache.notApplicable') }}</span>
+            <span v-else>{{ cacheHitRate(user)!.toFixed(1) }}%</span>
+          </td>
           <td class="py-1 text-right text-green-600 dark:text-green-400">
             {{ balanceUnitSymbol }}{{ formatCost(user.actual_cost) }}
           </td>
@@ -42,6 +46,7 @@ import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useBalanceDisplay } from '@/composables/useBalanceDisplay'
 import LoadingSpinner from '@/components/common/LoadingSpinner.vue'
+import { computeCacheHitRate } from '@/utils/cacheHitRate'
 import type { UserBreakdownItem } from '@/types'
 
 const { t } = useI18n()
@@ -60,6 +65,15 @@ const props = withDefaults(defineProps<{
 
 const showAccountCost = computed(() => props.showAccountCost)
 const showStandardCost = computed(() => props.showStandardCost)
+
+// 上游不回报缓存写入时创建值为 0，命中率仍按读取占输入侧总量计算；
+// 无任何缓存数据时返回 null，显示"不适用"。
+const cacheHitRate = (user: UserBreakdownItem): number | null =>
+  computeCacheHitRate(
+    user.input_tokens,
+    user.cache_creation_tokens ?? 0,
+    user.cache_read_tokens ?? 0,
+  )
 
 const formatTokens = (value: number): string => {
   if (value >= 1_000_000_000) return `${(value / 1_000_000_000).toFixed(2)}B`

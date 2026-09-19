@@ -162,28 +162,17 @@ func TestDashboardModelStatsInvalidModelSource(t *testing.T) {
 	require.Equal(t, http.StatusBadRequest, rec.Code)
 }
 
-func TestDashboardModelStatsAllTimeUsesZeroStart(t *testing.T) {
+func TestDashboardModelStatsFollowsTimeRange(t *testing.T) {
 	repo := &dashboardUsageRepoCapture{}
 	router := newDashboardRequestTypeTestRouter(repo)
 
-	req := httptest.NewRequest(http.MethodGet, "/admin/dashboard/models?start_date=2026-03-01&end_date=2026-03-02&all_time=true", nil)
+	req := httptest.NewRequest(http.MethodGet, "/admin/dashboard/models?start_date=2026-03-01&end_date=2026-03-02", nil)
 	rec := httptest.NewRecorder()
 	router.ServeHTTP(rec, req)
 
 	require.Equal(t, http.StatusOK, rec.Code)
-	// 部署后累计：起始时间退化为零值以覆盖全部历史。
-	require.True(t, repo.modelStart.IsZero())
-}
-
-func TestDashboardModelStatsRejectsInvalidAllTime(t *testing.T) {
-	repo := &dashboardUsageRepoCapture{}
-	router := newDashboardRequestTypeTestRouter(repo)
-
-	req := httptest.NewRequest(http.MethodGet, "/admin/dashboard/models?all_time=bad", nil)
-	rec := httptest.NewRecorder()
-	router.ServeHTTP(rec, req)
-
-	require.Equal(t, http.StatusBadRequest, rec.Code)
+	// 命中率与用量跟随页面时间范围，起始时间不得退化为零值。
+	require.False(t, repo.modelStart.IsZero())
 }
 
 func TestDashboardModelStatsValidModelSource(t *testing.T) {

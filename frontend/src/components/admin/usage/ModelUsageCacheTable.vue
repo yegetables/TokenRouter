@@ -21,9 +21,24 @@
             <th class="pb-2 text-right font-medium">{{ t('usage.modelUsageCache.requests') }}</th>
             <th class="pb-2 text-right font-medium">{{ t('usage.modelUsageCache.input') }}</th>
             <th class="pb-2 text-right font-medium">{{ t('usage.modelUsageCache.cache') }}</th>
-            <th class="pb-2 text-right font-medium">{{ t('usage.modelUsageCache.cacheRate') }}</th>
+            <th class="pb-2 text-right font-medium">
+              <span class="group relative inline-flex cursor-help items-center gap-0.5">
+                {{ t('usage.modelUsageCache.cacheRate') }}
+                <Icon name="infoCircle" size="xs" class="text-gray-400" :stroke-width="2" />
+                <span
+                  class="pointer-events-none absolute right-0 top-full z-30 mt-2 hidden w-64 rounded-lg border border-gray-200 bg-white p-3 text-left text-xs font-normal text-gray-700 shadow-lg group-hover:block group-focus:block dark:border-dark-600 dark:bg-dark-800 dark:text-dark-200"
+                >
+                  {{ t('usage.modelUsageCache.cacheRateHint') }}
+                </span>
+              </span>
+            </th>
             <th class="pb-2 text-right font-medium">{{ t('usage.modelUsageCache.output') }}</th>
-            <th class="pb-2 text-right font-medium">{{ t('usage.modelUsageCache.quota') }}</th>
+            <th class="pb-2 text-right font-medium">
+              <span class="inline-flex items-center justify-end gap-0.5">
+                {{ t('usage.modelUsageCache.quota') }}
+                <HelpTooltip :content="quotaUnitHint" :closable="false" width-class="w-64" />
+              </span>
+            </th>
           </tr>
         </thead>
         <tbody>
@@ -45,10 +60,15 @@
               {{ formatTokens(row.input) }}
             </td>
             <td class="py-2 text-right tabular-nums text-gray-600 dark:text-gray-400">
-              {{ formatTokens(row.cache) }}
+              <span v-if="!row.hasCacheData" class="text-gray-400 dark:text-gray-500">{{ t('usage.modelUsageCache.notApplicable') }}</span>
+              <span v-else-if="!row.hasCreation" :title="t('usage.modelUsageCache.creationNotReported')">
+                {{ formatTokens(row.cacheRead) }}<span class="text-gray-400 dark:text-gray-500">*</span>
+              </span>
+              <span v-else>{{ formatTokens(row.cache) }}</span>
             </td>
             <td class="py-2 text-right tabular-nums text-gray-600 dark:text-gray-400">
-              {{ row.cacheRate.toFixed(1) }}%
+              <span v-if="row.cacheRate === null" class="text-gray-400 dark:text-gray-500">{{ t('usage.modelUsageCache.notApplicable') }}</span>
+              <span v-else>{{ row.cacheRate.toFixed(1) }}%</span>
             </td>
             <td class="py-2 text-right tabular-nums text-gray-600 dark:text-gray-400">
               {{ formatTokens(row.output) }}
@@ -67,7 +87,10 @@
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import LoadingSpinner from '@/components/common/LoadingSpinner.vue'
+import Icon from '@/components/icons/Icon.vue'
+import HelpTooltip from '@/components/common/HelpTooltip.vue'
 import { useBalanceDisplay } from '@/composables/useBalanceDisplay'
+import { computeCacheHitRate, hasAnyCacheData, hasCacheCreationData } from '@/utils/cacheHitRate'
 import type { ModelStat } from '@/types'
 
 const props = withDefaults(defineProps<{
@@ -93,19 +116,21 @@ interface ModelUsageCacheRow {
   requests: number
   input: number
   cache: number
-  cacheRate: number
+  cacheRead: number
+  cacheRate: number | null
+  hasCacheData: boolean
+  hasCreation: boolean
   output: number
   quota: number
 }
 
-// 缓存 = 缓存创建 + 缓存读取；缓存率与 TokenUsageTrend 保持一致，分母为输入侧总量。
+// 缓存 = 缓存创建 + 缓存读取；缓存率分母为输入侧总量（口径见 utils/cacheHitRate）。
+// 上游不回报缓存写入时，创建值显示为"不适用"而不是故障性的 0。
 const rows = computed<ModelUsageCacheRow[]>(() =>
   (props.models || []).map((stat) => {
     const input = stat.input_tokens || 0
     const cacheCreation = stat.cache_creation_tokens || 0
     const cacheRead = stat.cache_read_tokens || 0
-    const cache = cacheCreation + cacheRead
-    const inputSideTokens = input + cache
     const quota = Number(
       (stat as unknown as Record<string, number | undefined>)[props.quotaField] ?? 0
     )
@@ -113,8 +138,11 @@ const rows = computed<ModelUsageCacheRow[]>(() =>
       model: stat.model,
       requests: stat.requests || 0,
       input,
-      cache,
-      cacheRate: inputSideTokens > 0 ? (cacheRead / inputSideTokens) * 100 : 0,
+      cache: cacheCreation + cacheRead,
+      cacheRead,
+      cacheRate: computeCacheHitRate(input, cacheCreation, cacheRead),
+      hasCacheData: hasAnyCacheData(cacheCreation, cacheRead),
+      hasCreation: hasCacheCreationData(cacheCreation),
       output: stat.output_tokens || 0,
       quota: Number.isFinite(quota) ? quota : 0,
     }
@@ -132,4 +160,10 @@ const formatQuota = (value: number): string =>
   props.quotaUnit === 'usd'
     ? formatUsdAmount(value, { fractionDigits: 2 })
     : formatBalanceAmount(value, { fractionDigits: 2 })
+
+const quotaUnitHint = computed(() =>
+  props.quotaUnit === 'usd'
+    ? t('admin.dashboard.accountUnitHint')
+    : t('admin.dashboard.actualUnitHint'),
+)
 </script>

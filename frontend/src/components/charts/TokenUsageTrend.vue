@@ -37,6 +37,7 @@ import LoadingSpinner from '@/components/common/LoadingSpinner.vue'
 import { useBalanceDisplay } from '@/composables/useBalanceDisplay'
 import { useTheme } from '@/composables/useTheme'
 import { externalTooltipHandler, hideExternalTooltip } from '@/utils/chartExternalTooltip'
+import { computeCacheHitRate } from '@/utils/cacheHitRate'
 import type { TrendDataPoint } from '@/types'
 
 ChartJS.register(
@@ -134,14 +135,13 @@ const chartData = computed(() => {
       },
       {
         label: 'Cached Input %',
-        data: props.trendData.map((d) => {
-          // 后端的 input_tokens 已扣除 cache_read，这里用输入侧总 token 作为命中率分母。
-          const inputSideTokens = d.input_tokens + d.cache_creation_tokens + d.cache_read_tokens
-          return inputSideTokens > 0 ? (d.cache_read_tokens / inputSideTokens) * 100 : 0
-        }),
+        // 命中率口径集中在 utils/cacheHitRate，避免与按模型/按用户表漂移。
+        // 无流量的时间点返回 null，让曲线断开，而不是画成 0% 造成"未命中"的误读。
+        data: props.trendData.map((d) => computeCacheHitRate(d.input_tokens, d.cache_creation_tokens, d.cache_read_tokens)),
         borderColor: chartColors.value.cacheHitRate,
         backgroundColor: `${chartColors.value.cacheHitRate}20`,
         fill: false,
+        spanGaps: false,
         tension: 0.3,
         yAxisID: 'yPercent'
       }
