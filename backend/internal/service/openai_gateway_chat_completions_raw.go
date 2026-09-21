@@ -382,6 +382,13 @@ func (s *OpenAIGatewayService) streamRawChatCompletions(
 		errors.Is(scanErr, context.Canceled) ||
 		errors.Is(scanErr, context.DeadlineExceeded)
 
+	// 未以换行结束的残行已在 scanner 层丢弃（不再进入下面的 terminal 观察），
+	// 但"上游发过数据却没给出终止信号"这一事实必须保留：否则只有残行的那次请求
+	// 会被 IsTruncated 判成正常收尾，退回成本次修复要消灭的"静默截断当成功"。
+	if scanner.droppedFragment {
+		terminal.sawDataLine = true
+	}
+
 	// 上游在任何终止信号之前结束：连接被 reset（scanErr != nil）或干净 EOF。
 	// 两者都不能再记成功——此前统一返回 nil error，把上游截断伪装成
 	// `HTTP 200 + usage 0/0`，客户端收到半截回答且 Ops 侧完全无感。

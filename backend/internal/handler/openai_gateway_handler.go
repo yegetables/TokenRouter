@@ -3359,6 +3359,21 @@ func (h *OpenAIGatewayHandler) handleStreamingAwareErrorWithCode(
 		} else {
 			service.MarkOpsStreamError(c, errType, message, status)
 		}
+		// 注入合成错误帧前先补一个空行，闭合可能还没结束的 SSE 事件。
+		//
+		// 上游如果在事件写完 data 行、结束空行尚未写出时断开，此处不闭合就会让错误帧
+		// 被 SSE 语义并进同一个事件，客户端拿到的 data 变成
+		// `{半截JSON}\n{"error":...}`——两个 JSON 挤在一个 data 字段里，严格客户端
+		// （opencode 等）会以 "Invalid ... stream event" 中断整轮对话。
+		// 已经处于事件边界时，多出的空行只是一个没有 data 的空事件，客户端会忽略。
+		// 与上游同族修复 #1479（terminate in-progress SSE event）做法一致。
+		// 仅在本请求确实写出过响应体字节时补：只提交过响应头（例如并发等待期的
+		// keepalive comment）时补空行会在流首凭空多出一个空事件。
+		if c.Writer.Size() > 0 {
+			if _, ok := c.Writer.(http.Flusher); ok {
+				_, _ = fmt.Fprint(c.Writer, "\n")
+			}
+		}
 		// /v1/responses 的严格 SDK（Codex CLI）要求终止事件必须属于
 		// response.completed/failed/incomplete/cancelled 集合。
 		// 通用 `event: error` 帧不被识别为终止事件，会导致

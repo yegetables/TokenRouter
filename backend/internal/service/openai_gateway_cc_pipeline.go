@@ -31,15 +31,44 @@ import (
 // （GLM effort 归一化、fast policy、Grok 分支、ClientDisconnect 语义等）仍留在
 // 调用方，属于有意保留的行为差异，不在此强行统一。
 
-// newUpstreamSSEScanner 构造读取上游 SSE 流的行扫描器，按配置放大单行上限。
-func (s *OpenAIGatewayService) newUpstreamSSEScanner(r io.Reader) *bufio.Scanner {
+// upstreamSSEScanner 包装 bufio.Scanner，并记录是否丢弃过"未以换行结束"的上游残行。
+//
+// 为什么必须包这一层：bufio 的 ScanLines 在遇到读错误（如 http2: client connection
+// lost）时，会把缓冲区里没有换行结尾的残留数据按 atEOF 语义当成最后一个 token 返回。
+// 原样写出去，客户端就会收到一个没有空行闭合的半截事件；handler 随后补发的错误帧
+// 会被 SSE 语义并进同一个事件，形成 `{半截JSON}\n{"error":...}` 这种两个 JSON 挤在
+// 一个 data 字段里的畸形帧，严格客户端（opencode 等）解析失败后中断整轮对话。
+//
+// 因此这里对"未以换行结束"的残行一律整行丢弃：正常流每一行都以换行结束，行为不变；
+// 只有上游真的在行中间断开时才会少一段本来就不完整的数据。
+type upstreamSSEScanner struct {
+	*bufio.Scanner
+	// droppedFragment 表示上游在行中间断开、末段未闭合残行已被丢弃。
+	// 调用方据此保留"上游发过数据但流未正常终止"的截断判定信号，避免把截断误判成成功。
+	droppedFragment bool
+}
+
+// newUpstreamSSEScanner 构造读取上游 SSE 流的行扫描器，按配置放大单行上限，
+// 并丢弃上游中断留下的未闭合残行（见 upstreamSSEScanner）。
+func (s *OpenAIGatewayService) newUpstreamSSEScanner(r io.Reader) *upstreamSSEScanner {
 	scanner := bufio.NewScanner(r)
 	maxLineSize := defaultMaxLineSize
 	if s.cfg != nil && s.cfg.Gateway.MaxLineSize > 0 {
 		maxLineSize = s.cfg.Gateway.MaxLineSize
 	}
+	wrapped := &upstreamSSEScanner{Scanner: scanner}
 	scanner.Buffer(make([]byte, 0, 64*1024), maxLineSize)
-	return scanner
+	scanner.Split(func(data []byte, atEOF bool) (int, []byte, error) {
+		advance, token, err := bufio.ScanLines(data, atEOF)
+		// 只有当 Scanner 已经进入 atEOF（读错误或流结束）且缓冲区剩余数据没有换行结尾时，
+		// 这个 token 才是"半截行"；推进读取但不出 token，等于把它丢掉。
+		if err == nil && atEOF && token != nil && !bytes.HasSuffix(data, []byte("\n")) {
+			wrapped.droppedFragment = true
+			return advance, nil, nil
+		}
+		return advance, token, err
+	})
+	return wrapped
 }
 
 // newStreamHeaderWriter 返回幂等的 SSE 响应头写入闭包：首次调用时透传过滤后的

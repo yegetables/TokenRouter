@@ -537,7 +537,16 @@ func TestOpenAIEnsureForwardErrorResponse_AfterDeltaAppendsSingleValidResponseFa
 	h := &OpenAIGatewayHandler{}
 	require.True(t, h.ensureForwardErrorResponse(c, true))
 
-	frames := strings.Split(strings.TrimSuffix(w.Body.String(), "\n\n"), "\n\n")
+	// 注入失败终态前会先补一个事件边界空行（上游可能断在半截事件上，
+	// 见 #1479 同族修复）。该空行可能落在上一帧尾部或下一帧帧首，按 SSE 语义
+	// 都只是事件分隔符，因此这里先规范化帧首空行再计数。
+	var frames []string
+	for _, frame := range strings.Split(strings.TrimSuffix(w.Body.String(), "\n\n"), "\n\n") {
+		frame = strings.TrimLeft(frame, "\n")
+		if frame != "" {
+			frames = append(frames, frame)
+		}
+	}
 	require.Len(t, frames, 2)
 	errorEvents := 0
 	for _, frame := range frames {
