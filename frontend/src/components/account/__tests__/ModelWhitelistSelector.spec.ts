@@ -147,4 +147,59 @@ describe('ModelWhitelistSelector', () => {
     expect(syncUpstreamModelsPreview).not.toHaveBeenCalled()
     expect(wrapper.emitted('update:modelValue')?.[0]?.[0]).toEqual(['claude-sonnet-4-5'])
   })
+
+  it('同步上游模型时用上游结果覆盖白名单并移除已下线模型', async () => {
+    syncUpstreamModels.mockResolvedValue({ models: ['gpt-5.1', 'o3'] })
+    const wrapper = mountSelector({
+      platform: 'openai',
+      accountId: 8,
+      modelValue: ['gpt-5.1', 'legacy-model']
+    })
+
+    const button = wrapper.findAll('button').find((item) => item.text().includes('admin.accounts.syncUpstreamModels'))
+    expect(button).toBeTruthy()
+    await button!.trigger('click')
+    await flushPromises()
+
+    expect(wrapper.emitted('update:modelValue')?.[0]?.[0]).toEqual(['gpt-5.1', 'o3'])
+    expect(showSuccess).toHaveBeenCalled()
+    // 有模型被移除时额外提示，避免静默删除白名单项。
+    expect(showInfo).toHaveBeenCalled()
+  })
+
+  it('上游返回空列表时不覆盖白名单并提示获取失败', async () => {
+    syncUpstreamModels.mockResolvedValue({ models: [] })
+    const wrapper = mountSelector({
+      platform: 'openai',
+      accountId: 9,
+      modelValue: ['keep-me']
+    })
+
+    const button = wrapper.findAll('button').find((item) => item.text().includes('admin.accounts.syncUpstreamModels'))
+    expect(button).toBeTruthy()
+    await button!.trigger('click')
+    await flushPromises()
+
+    expect(wrapper.emitted('update:modelValue')).toBeUndefined()
+    expect(showError).toHaveBeenCalled()
+    expect(showSuccess).not.toHaveBeenCalled()
+  })
+
+  it('上游结果与白名单一致时不触发更新', async () => {
+    syncUpstreamModels.mockResolvedValue({ models: ['a', 'b'] })
+    const wrapper = mountSelector({
+      platform: 'openai',
+      accountId: 10,
+      modelValue: ['b', 'a']
+    })
+
+    const button = wrapper.findAll('button').find((item) => item.text().includes('admin.accounts.syncUpstreamModels'))
+    expect(button).toBeTruthy()
+    await button!.trigger('click')
+    await flushPromises()
+
+    expect(wrapper.emitted('update:modelValue')).toBeUndefined()
+    expect(showInfo).toHaveBeenCalled()
+    expect(showSuccess).not.toHaveBeenCalled()
+  })
 })

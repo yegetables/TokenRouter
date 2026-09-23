@@ -318,26 +318,28 @@ const syncUpstreamModels = async () => {
       return
     }
 
-    const upstreamModels = result.models.map(model => model.trim()).filter(Boolean)
+    // 去重后按上游结果整体覆盖；空结果视为获取失败，保留当前白名单不覆盖。
+    const upstreamModels = [...new Set(result.models.map(model => model.trim()).filter(Boolean))]
     if (upstreamModels.length === 0) {
-      appStore.showInfo(t('admin.accounts.syncUpstreamModelsEmpty'))
+      appStore.showError(t('admin.accounts.syncUpstreamModelsEmpty'))
       return
     }
 
-    const newModels = [...props.modelValue]
-    let addedCount = 0
-    for (const model of upstreamModels) {
-      if (!newModels.includes(model)) {
-        newModels.push(model)
-        addedCount += 1
-      }
+    const currentModels = props.modelValue.map(model => model.trim()).filter(Boolean)
+    const upstreamSet = new Set(upstreamModels)
+    const removedCount = currentModels.filter(model => !upstreamSet.has(model)).length
+    const currentSet = new Set(currentModels)
+    const unchanged = removedCount === 0 && upstreamModels.every(model => currentSet.has(model))
+
+    if (unchanged) {
+      appStore.showInfo(t('admin.accounts.syncUpstreamModelsNoChanges', { count: upstreamModels.length }))
+      return
     }
 
-    emit('update:modelValue', newModels)
-    if (addedCount > 0) {
-      appStore.showSuccess(t('admin.accounts.syncUpstreamModelsSuccess', { count: addedCount, total: upstreamModels.length }))
-    } else {
-      appStore.showInfo(t('admin.accounts.syncUpstreamModelsNoChanges', { count: upstreamModels.length }))
+    emit('update:modelValue', upstreamModels)
+    appStore.showSuccess(t('admin.accounts.syncUpstreamModelsSuccess', { count: upstreamModels.length }))
+    if (removedCount > 0) {
+      appStore.showInfo(t('admin.accounts.syncUpstreamModelsRemoved', { count: removedCount }))
     }
   } catch (error) {
     const message = error instanceof Error ? error.message : t('admin.accounts.syncUpstreamModelsFailed')
