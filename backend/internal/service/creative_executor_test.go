@@ -168,6 +168,22 @@ func TestCreativeOpenAICompatImageProfile(t *testing.T) {
 	require.True(t, isCreativeOpenAIImageModel("wan2.7-image"))
 }
 
+// TestCreativePlatformImageModel 校验执行器最终的生图模型判定：
+// openai 平台除 GPT Image 原生族外，也必须接受已登记的第三方兼容生图模型，
+// 否则目录能列出但执行器会以 "is not an image model" 拒绝。
+func TestCreativePlatformImageModel(t *testing.T) {
+	require.True(t, creativePlatformImageModel(PlatformOpenAI, "gpt-image-2"))
+	require.True(t, creativePlatformImageModel(PlatformOpenAI, "qwen-image-2.0"))
+	require.True(t, creativePlatformImageModel(PlatformOpenAI, "wan2.7-image"))
+	require.True(t, creativePlatformImageModel(PlatformOpenAI, "gemini-3.1-flash-lite-image"))
+	require.False(t, creativePlatformImageModel(PlatformOpenAI, "deepseek-flash"))
+	require.False(t, creativePlatformImageModel(PlatformOpenAI, "glm-5.3"))
+
+	require.True(t, creativePlatformImageModel(PlatformGrok, "grok-imagine-image"))
+	require.False(t, creativePlatformImageModel(PlatformGrok, "gpt-image-2"))
+	require.False(t, creativePlatformImageModel(PlatformGemini, "qwen-image-2.0"))
+}
+
 // TestCreativeGrokOperationMatrix grok 平台支持 generate 与 edit，但不支持 inpaint。
 func TestCreativeGrokOperationMatrix(t *testing.T) {
 	executor := &CreativeExecutor{}

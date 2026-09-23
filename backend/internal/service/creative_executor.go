@@ -188,7 +188,9 @@ func (e *CreativeExecutor) Prepare(ctx context.Context, run CreativeRun) (*Creat
 func creativePlatformImageModel(platform, model string) bool {
 	switch platform {
 	case PlatformOpenAI:
-		return IsGPTImageGenerationModel(model)
+		// GPT Image 原生族与已登记的第三方 OpenAI 兼容生图模型（qwen-image、wan2.7-image、
+		// gemini-3.1-flash-lite-image 等）；用统一判定避免目录能列出但执行器拒绝。
+		return isCreativeOpenAIImageModel(model)
 	case PlatformGrok:
 		return isGrokImageGenerationModel(model)
 	case PlatformGemini:
