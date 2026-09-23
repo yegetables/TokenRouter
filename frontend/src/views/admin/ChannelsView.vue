@@ -724,7 +724,7 @@ import { adminAPI } from '@/api/admin'
 import type { Channel, ChannelModelPricing, CreateChannelRequest, UpdateChannelRequest, AccountStatsPricingRule } from '@/api/admin/channels'
 import type { Account } from '@/types'
 import type { PricingFormEntry } from '@/components/admin/channel/types'
-import { applyAccountModelsToPricing, createEmptyPricingEntry, diffAccountModels, normalizeModelNames } from '@/components/admin/channel/accountModelSync'
+import { applyAccountModelsToPricing, createEmptyPricingEntry, diffAccountModels, normalizeModelNames, refreshAccountModelsConcurrently } from '@/components/admin/channel/accountModelSync'
 import { apiIntervalsToForm, apiTimePricingToForm, createDefaultTimePricingForm, findModelConflict, formIntervalsToAPI, formTimePricingToAPI, hasExplicitPricing, isValidPositiveMultiplier, mTokToPerToken, perTokenToMTok, toNullableNumber, validateIntervals, validateTimePricing } from '@/components/admin/channel/types'
 import type { AdminGroup, GroupPlatform } from '@/types'
 import type { Column } from '@/components/common/types'
@@ -1097,24 +1097,28 @@ async function analyzeAccountModelSync(sectionIdx: number, refreshUpstream: bool
       appStore.showInfo(t('admin.channels.form.syncAccountModelsNoAccounts'))
       return
     }
-    if (refreshUpstream) {
-      // 覆盖式刷新：空结果不改白名单并报错，此时中止整体同步避免用不完整的并集覆盖价卡。
-      for (const account of accounts) {
-        try {
-          await adminAPI.accounts.syncUpstreamModels(account.id, { apply: true })
-        } catch (error) {
-          appStore.showError(t('admin.channels.form.syncAccountModelsRefreshFailed', {
-            name: account.name,
-            message: extractApiErrorMessage(error, '')
-          }))
-          return
-        }
-      }
-    }
-
+    // 模型并集：刷新模式并发拉取，失效账号忽略，只取成功账号；否则读账号已知白名单。
     const union = new Set<string>()
-    for (const account of accounts) {
-      for (const model of accountModelWhitelist(account)) union.add(model)
+    if (refreshUpstream) {
+      const outcome = await refreshAccountModelsConcurrently(accounts, id =>
+        adminAPI.accounts.syncUpstreamModels(id, { apply: true })
+      )
+      for (const model of outcome.union) union.add(model)
+      if (union.size === 0) {
+        appStore.showError(t('admin.channels.form.syncAccountModelsRefreshAllFailed', { count: accounts.length }))
+        return
+      }
+      if (outcome.failedNames.length > 0) {
+        appStore.showInfo(t('admin.channels.form.syncAccountModelsRefreshPartial', {
+          failed: outcome.failedNames.length,
+          total: accounts.length,
+          names: outcome.failedNames.join('、')
+        }))
+      }
+    } else {
+      for (const account of accounts) {
+        for (const model of accountModelWhitelist(account)) union.add(model)
+      }
     }
     if (union.size === 0) {
       appStore.showInfo(t('admin.channels.form.syncAccountModelsEmpty'))

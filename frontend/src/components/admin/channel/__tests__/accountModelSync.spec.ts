@@ -5,7 +5,8 @@ import {
   createEmptyPricingEntry,
   diffAccountModels,
   looksLikeImageModelName,
-  normalizeModelNames
+  normalizeModelNames,
+  refreshAccountModelsConcurrently
 } from '../accountModelSync'
 import type { PricingFormEntry } from '../types'
 
@@ -95,5 +96,48 @@ describe('applyAccountModelsToPricing', () => {
 
   it('并集为空时清空全部价卡', () => {
     expect(applyAccountModelsToPricing([tokenEntry(['a'], 8)], [])).toEqual([])
+  })
+})
+
+describe('refreshAccountModelsConcurrently', () => {
+  it('并发刷新：忽略失效账号，只用成功账号的并集', async () => {
+    let inFlight = 0
+    let maxInFlight = 0
+    const outcome = await refreshAccountModelsConcurrently(
+      [{ id: 1, name: 'a' }, { id: 2, name: 'broken' }, { id: 3, name: 'c' }],
+      async id => {
+        inFlight += 1
+        maxInFlight = Math.max(maxInFlight, inFlight)
+        await new Promise(resolve => setTimeout(resolve, 0))
+        inFlight -= 1
+        if (id === 2) throw new Error('upstream failed')
+        return { models: id === 1 ? ['x', 'y'] : ['y', 'z'] }
+      }
+    )
+
+    // 三个请求同时进行（并发），而不是逐个串行。
+    expect(maxInFlight).toBe(3)
+    expect(outcome.union).toEqual(['x', 'y', 'z'])
+    expect(outcome.failedNames).toEqual(['broken'])
+  })
+
+  it('全部失败时并集为空并列出全部账号', async () => {
+    const outcome = await refreshAccountModelsConcurrently(
+      [{ id: 1, name: 'a' }, { id: 2, name: 'b' }],
+      async () => {
+        throw new Error('down')
+      }
+    )
+    expect(outcome.union).toEqual([])
+    expect(outcome.failedNames).toEqual(['a', 'b'])
+  })
+
+  it('成功账号返回空列表时不影响其他账号的并集', async () => {
+    const outcome = await refreshAccountModelsConcurrently(
+      [{ id: 1, name: 'a' }, { id: 2, name: 'b' }],
+      async id => ({ models: id === 1 ? [] : ['m'] })
+    )
+    expect(outcome.union).toEqual(['m'])
+    expect(outcome.failedNames).toEqual([])
   })
 })

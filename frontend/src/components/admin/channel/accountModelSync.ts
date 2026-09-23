@@ -104,3 +104,29 @@ export function applyAccountModelsToPricing(pricing: PricingFormEntry[], union: 
   }
   return kept
 }
+
+export interface UpstreamModelRefreshOutcome {
+  /** 成功账号的模型并集 */
+  union: string[]
+  /** 获取失败的账号名（已忽略，不参与并集） */
+  failedNames: string[]
+}
+
+// refreshAccountModelsConcurrently 并发刷新各账号的上游模型：
+// 失效账号忽略、不参与并集；只有全部失败时并集才为空。
+export async function refreshAccountModelsConcurrently(
+  accounts: Array<{ id: number; name: string }>,
+  refresh: (id: number) => Promise<{ models?: string[] | null }>
+): Promise<UpstreamModelRefreshOutcome> {
+  const results = await Promise.allSettled(accounts.map(account => refresh(account.id)))
+  const union = new Set<string>()
+  const failedNames: string[] = []
+  results.forEach((result, index) => {
+    if (result.status === 'fulfilled') {
+      for (const model of normalizeModelNames(result.value?.models ?? [])) union.add(model)
+    } else {
+      failedNames.push(accounts[index].name)
+    }
+  })
+  return { union: [...union], failedNames }
+}

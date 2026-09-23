@@ -521,7 +521,7 @@ riskControl: {
         syncingAccountModels: '同步中...',
         syncAccountModelsTitle: '同步账号支持模型',
         syncAccountModelsHint: '将用该渠道下账号的已知支持模型并集覆盖渠道模型价卡：已有模型复用原价格，新增模型填 0（免费），并集外的模型将被移除。',
-        syncAccountModelsRefreshUpstream: '同时从上游刷新账号支持模型（覆盖式，空结果不改并报错）',
+        syncAccountModelsRefreshUpstream: '同时从上游刷新账号支持模型（并发覆盖式；失效账号忽略）',
         syncAccountModelsAdded: '新增模型（{count}）',
         syncAccountModelsReused: '复用原价格（{count}）',
         syncAccountModelsRemoved: '将移除（{count}）',
@@ -530,7 +530,8 @@ riskControl: {
         syncAccountModelsEmpty: '账号没有已知支持模型，未做改动',
         syncAccountModelsNoGroups: '请先为该渠道选择分组',
         syncAccountModelsNoAccounts: '该渠道的分组下没有账号',
-        syncAccountModelsRefreshFailed: '刷新账号「{name}」上游模型失败：{message}',
+        syncAccountModelsRefreshAllFailed: '所有账号的上游模型获取都失败（{count} 个），未做改动',
+        syncAccountModelsRefreshPartial: '{failed}/{total} 个账号获取失败已忽略：{names}',
         syncAccountModelsError: '同步账号支持模型失败',
         syncAccountModelsApplied: '已覆盖渠道价卡：新增 {added} 个、移除 {removed} 个模型（保存渠道后生效）'
       }

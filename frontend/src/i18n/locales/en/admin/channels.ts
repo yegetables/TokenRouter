@@ -521,7 +521,7 @@ riskControl: {
          syncingAccountModels: 'Syncing...',
          syncAccountModelsTitle: 'Sync Account Models',
          syncAccountModelsHint: 'Replaces the channel price card with the union of its accounts\u2019 known supported models: existing models keep their prices, new models are set to 0 (free), and models outside the union are removed.',
-         syncAccountModelsRefreshUpstream: 'Also refresh account models from upstream (replace; empty result keeps the whitelist and errors)',
+         syncAccountModelsRefreshUpstream: 'Also refresh account models from upstream (concurrent replace; failed accounts ignored)',
          syncAccountModelsAdded: 'New models ({count})',
          syncAccountModelsReused: 'Keep existing price ({count})',
          syncAccountModelsRemoved: 'Will be removed ({count})',
@@ -530,7 +530,8 @@ riskControl: {
          syncAccountModelsEmpty: 'Accounts have no known supported models; nothing changed',
          syncAccountModelsNoGroups: 'Select groups for this channel first',
          syncAccountModelsNoAccounts: 'No accounts under this channel\u2019s groups',
-         syncAccountModelsRefreshFailed: 'Failed to refresh upstream models for account "{name}": {message}',
+         syncAccountModelsRefreshAllFailed: 'All {count} account(s) failed to fetch upstream models; nothing changed',
+         syncAccountModelsRefreshPartial: 'Ignored {failed}/{total} account(s) that failed to fetch: {names}',
          syncAccountModelsError: 'Failed to sync account models',
          syncAccountModelsApplied: 'Price card replaced: {added} added, {removed} removed (takes effect after saving the channel)'
        }
