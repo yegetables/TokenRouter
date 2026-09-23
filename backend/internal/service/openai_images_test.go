@@ -384,6 +384,35 @@ func TestOpenAIGatewayServiceParseOpenAIImagesRequest_AllowsGrokImageModels(t *t
 	}
 }
 
+// TestOpenAIGatewayServiceParseOpenAIImagesRequest_AllowsThirdPartyImageModels 校验
+// 名称含 image 的第三方兼容生图模型可走 images 端点，而普通文本模型仍被拒。
+func TestOpenAIGatewayServiceParseOpenAIImagesRequest_AllowsThirdPartyImageModels(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	for _, model := range []string{"qwen-image-2.0", "wan2.7-image", "gemini-3.1-flash-lite-image"} {
+		t.Run(model, func(t *testing.T) {
+			body := []byte(fmt.Sprintf(`{"model":%q,"prompt":"draw a cat"}`, model))
+			req := httptest.NewRequest(http.MethodPost, "/v1/images/generations", bytes.NewReader(body))
+			req.Header.Set("Content-Type", "application/json")
+			rec := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(rec)
+			c.Request = req
+
+			svc := &OpenAIGatewayService{}
+			parsed, err := svc.ParseOpenAIImagesRequest(c, body)
+			require.NoError(t, err)
+			require.NotNil(t, parsed)
+			require.Equal(t, model, parsed.Model)
+		})
+	}
+
+	// 不含 image 关键字的普通文本模型仍必须被拒。
+	for _, model := range []string{"gpt-5.4", "deepseek-flash", "glm-5.3"} {
+		require.ErrorContains(t, validateOpenAIImagesModel(model),
+			fmt.Sprintf(`images endpoint requires an image model, got %q`, model))
+	}
+}
+
 func TestOpenAIGatewayServiceParseOpenAIImagesRequest_JSONEditURLs(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	body := []byte(`{

@@ -501,7 +501,10 @@ func isGrokImageGenerationModel(model string) bool {
 
 func validateOpenAIImagesModel(model string) error {
 	model = strings.TrimSpace(model)
-	if isOpenAIImageGenerationModel(model) {
+	// 除 GPT Image / Grok Imagine 原生族外，也放行名称含 image 的第三方兼容生图模型
+	//（如 qwen-image-2.0、wan2.7-image、gemini-3.1-flash-lite-image）。
+	// 复用生图别名判定，避免每接入一个第三方生图模型都要改放行名单。
+	if isOpenAIImageBillingModelAlias(model) {
 		return nil
 	}
 	if model == "" {
