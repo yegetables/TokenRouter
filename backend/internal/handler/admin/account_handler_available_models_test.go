@@ -552,6 +552,109 @@ func TestAccountHandlerSyncUpstreamModelsPreview_UsesProvidedCredentials(t *test
 	require.Equal(t, []string{"gpt-5.1", "o3"}, resp.Data.Models)
 }
 
+// apply=true 时用上游结果覆盖账号最终模型白名单（覆盖式、去重、敏感键不回写）。
+func TestAccountHandlerSyncUpstreamModels_ApplyReplacesWhitelist(t *testing.T) {
+	stub := newStubAdminService()
+	svc := &availableModelsAdminService{
+		stubAdminService: stub,
+		account: service.Account{
+			ID:       46,
+			Name:     "openai-apikey-apply",
+			Platform: service.PlatformOpenAI,
+			Type:     service.AccountTypeAPIKey,
+			Status:   service.StatusActive,
+			Credentials: map[string]any{
+				"api_key":         "openai-key",
+				"base_url":        "https://openai.example.com/v1",
+				"model_whitelist": []any{"stale-a", "stale-b"},
+			},
+		},
+	}
+	router := setupSyncUpstreamModelsRouter(svc, &syncUpstreamHTTPUpstream{resp: &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": []string{"application/json"}},
+		Body:       io.NopCloser(strings.NewReader(`{"data":[{"id":"gpt-5.1"},{"id":"o3"},{"id":"gpt-5.1"}]}`)),
+	}})
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/accounts/46/models/sync-upstream?apply=true", nil)
+	router.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.NotNil(t, stub.updateAccountInput, "apply=true 必须落库白名单")
+	// 覆盖式：旧模型被移除，按上游顺序去重。
+	require.Equal(t, []string{"gpt-5.1", "o3"}, stub.updateAccountInput.Credentials["model_whitelist"])
+	// 非敏感键整份回写，避免被「incoming 全量决定」的合并语义清空。
+	require.Equal(t, "https://openai.example.com/v1", stub.updateAccountInput.Credentials["base_url"])
+	// 敏感键必须省略，由仓储层保留原值。
+	_, hasKey := stub.updateAccountInput.Credentials["api_key"]
+	require.False(t, hasKey, "敏感键不得随请求回写")
+}
+
+// apply=true 但上游返回空列表：视为获取失败，不改白名单。
+func TestAccountHandlerSyncUpstreamModels_ApplyEmptyKeepsWhitelist(t *testing.T) {
+	stub := newStubAdminService()
+	svc := &availableModelsAdminService{
+		stubAdminService: stub,
+		account: service.Account{
+			ID:       47,
+			Name:     "openai-apikey-apply-empty",
+			Platform: service.PlatformOpenAI,
+			Type:     service.AccountTypeAPIKey,
+			Status:   service.StatusActive,
+			Credentials: map[string]any{
+				"api_key":         "openai-key",
+				"base_url":        "https://openai.example.com/v1",
+				"model_whitelist": []any{"keep-me"},
+			},
+		},
+	}
+	router := setupSyncUpstreamModelsRouter(svc, &syncUpstreamHTTPUpstream{resp: &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": []string{"application/json"}},
+		Body:       io.NopCloser(strings.NewReader(`{"data":[]}`)),
+	}})
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/accounts/47/models/sync-upstream?apply=true", nil)
+	router.ServeHTTP(rec, req)
+
+	require.NotEqual(t, http.StatusOK, rec.Code, "空结果必须报错")
+	require.Nil(t, stub.updateAccountInput, "空结果不得改写白名单")
+}
+
+// 缺省 apply=false：保持历史行为，只返回列表，不动白名单。
+func TestAccountHandlerSyncUpstreamModels_WithoutApplyDoesNotWriteWhitelist(t *testing.T) {
+	stub := newStubAdminService()
+	svc := &availableModelsAdminService{
+		stubAdminService: stub,
+		account: service.Account{
+			ID:       48,
+			Name:     "openai-apikey-no-apply",
+			Platform: service.PlatformOpenAI,
+			Type:     service.AccountTypeAPIKey,
+			Status:   service.StatusActive,
+			Credentials: map[string]any{
+				"api_key":         "openai-key",
+				"base_url":        "https://openai.example.com/v1",
+				"model_whitelist": []any{"keep-me"},
+			},
+		},
+	}
+	router := setupSyncUpstreamModelsRouter(svc, &syncUpstreamHTTPUpstream{resp: &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": []string{"application/json"}},
+		Body:       io.NopCloser(strings.NewReader(`{"data":[{"id":"gpt-5.1"}]}`)),
+	}})
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/accounts/48/models/sync-upstream", nil)
+	router.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Nil(t, stub.updateAccountInput, "缺省 apply=false 不得写白名单")
+}
+
 func TestAccountHandlerSyncUpstreamModelsPreview_ConfigErrorReturnsBadRequest(t *testing.T) {
 	router := setupSyncUpstreamModelsRouter(newStubAdminService(), &syncUpstreamHTTPUpstream{})
 

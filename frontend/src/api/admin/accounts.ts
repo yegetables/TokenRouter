@@ -826,10 +826,18 @@ export interface SyncUpstreamModelsResult {
 /**
  * 从账号上游模型列表端点同步实时支持的模型。
  * @param id - 账号 ID
+ * @param options.apply - true 时用上游结果覆盖账号最终模型白名单（空结果不改并报错）
  * @returns 上游返回的模型 ID 列表
  */
-export async function syncUpstreamModels(id: number): Promise<SyncUpstreamModelsResult> {
-  const { data } = await apiClient.post<SyncUpstreamModelsResult>(`/admin/accounts/${id}/models/sync-upstream`)
+export async function syncUpstreamModels(
+  id: number,
+  options?: { apply?: boolean }
+): Promise<SyncUpstreamModelsResult> {
+  const { data } = await apiClient.post<SyncUpstreamModelsResult>(
+    `/admin/accounts/${id}/models/sync-upstream`,
+    undefined,
+    { params: options?.apply ? { apply: true } : undefined }
+  )
   return data
 }
 

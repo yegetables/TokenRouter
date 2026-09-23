@@ -427,6 +427,16 @@
                 <div class="flex items-center gap-2">
                   <button
                     type="button"
+                    @click="openAccountModelSync(sIdx)"
+                    :disabled="syncingAccountModels === section.platform"
+                    class="text-xs text-gray-500 hover:text-primary-600 disabled:opacity-50"
+                  >
+                    {{ syncingAccountModels === section.platform
+                      ? t('admin.channels.form.syncingAccountModels')
+                      : t('admin.channels.form.syncAccountModels') }}
+                  </button>
+                  <button
+                    type="button"
                     @click="syncLatestModels(sIdx)"
                     :disabled="syncingPlatform === section.platform"
                     class="text-xs text-gray-500 hover:text-primary-600 disabled:opacity-50"
@@ -615,6 +625,82 @@
       </template>
     </BaseDialog>
 
+    <!-- 同步账号支持模型：预览并集差异后覆盖渠道价卡 -->
+    <BaseDialog
+      :show="accountModelSync.show"
+      :title="t('admin.channels.form.syncAccountModelsTitle')"
+      width="wide"
+      @close="accountModelSync.show = false"
+    >
+      <div class="space-y-4 text-sm">
+        <p class="text-gray-500 dark:text-gray-400">
+          {{ t('admin.channels.form.syncAccountModelsHint') }}
+        </p>
+
+        <label class="flex items-center gap-2">
+          <input
+            type="checkbox"
+            class="h-4 w-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500"
+            :checked="accountModelSync.refreshUpstream"
+            :disabled="accountModelSync.loading"
+            @change="onRefreshUpstreamChange(accountModelSync.sectionIdx, ($event.target as HTMLInputElement).checked)"
+          />
+          <span>{{ t('admin.channels.form.syncAccountModelsRefreshUpstream') }}</span>
+        </label>
+
+        <div v-if="accountModelSync.loading" class="py-4 text-center text-xs text-gray-400">
+          {{ t('admin.channels.form.syncingAccountModels') }}
+        </div>
+        <template v-else>
+          <div>
+            <p class="mb-1 text-xs font-medium text-gray-600 dark:text-gray-300">
+              {{ t('admin.channels.form.syncAccountModelsAdded', { count: accountModelSync.added.length }) }}
+            </p>
+            <p class="break-all text-xs text-gray-500 dark:text-gray-400">
+              {{ accountModelSync.added.length ? accountModelSync.added.join('、') : t('admin.channels.form.syncAccountModelsNone') }}
+            </p>
+          </div>
+          <div>
+            <p class="mb-1 text-xs font-medium text-gray-600 dark:text-gray-300">
+              {{ t('admin.channels.form.syncAccountModelsReused', { count: accountModelSync.reused.length }) }}
+            </p>
+            <p class="break-all text-xs text-gray-500 dark:text-gray-400">
+              {{ accountModelSync.reused.length ? accountModelSync.reused.join('、') : t('admin.channels.form.syncAccountModelsNone') }}
+            </p>
+          </div>
+          <div>
+            <p class="mb-1 text-xs font-medium text-red-600 dark:text-red-400">
+              {{ t('admin.channels.form.syncAccountModelsRemoved', { count: accountModelSync.removed.length }) }}
+            </p>
+            <p class="break-all text-xs text-red-500 dark:text-red-400">
+              {{ accountModelSync.removed.length ? accountModelSync.removed.join('、') : t('admin.channels.form.syncAccountModelsNone') }}
+            </p>
+          </div>
+        </template>
+      </div>
+
+      <template #footer>
+        <div class="flex justify-end gap-2">
+          <button
+            type="button"
+            class="btn btn-secondary"
+            :disabled="accountModelSync.loading"
+            @click="accountModelSync.show = false"
+          >
+            {{ t('common.cancel', 'Cancel') }}
+          </button>
+          <button
+            type="button"
+            class="btn btn-primary"
+            :disabled="accountModelSync.loading"
+            @click="applyAccountModelSync"
+          >
+            {{ t('admin.channels.form.syncAccountModelsConfirm') }}
+          </button>
+        </div>
+      </template>
+    </BaseDialog>
+
     <!-- Delete Confirmation -->
     <ConfirmDialog
       :show="showDeleteDialog"
@@ -636,7 +722,9 @@ import { useAppStore } from '@/stores/app'
 import { extractApiErrorMessage } from '@/utils/apiError'
 import { adminAPI } from '@/api/admin'
 import type { Channel, ChannelModelPricing, CreateChannelRequest, UpdateChannelRequest, AccountStatsPricingRule } from '@/api/admin/channels'
+import type { Account } from '@/types'
 import type { PricingFormEntry } from '@/components/admin/channel/types'
+import { applyAccountModelsToPricing, createEmptyPricingEntry, diffAccountModels, normalizeModelNames } from '@/components/admin/channel/accountModelSync'
 import { apiIntervalsToForm, apiTimePricingToForm, createDefaultTimePricingForm, findModelConflict, formIntervalsToAPI, formTimePricingToAPI, hasExplicitPricing, isValidPositiveMultiplier, mTokToPerToken, perTokenToMTok, toNullableNumber, validateIntervals, validateTimePricing } from '@/components/admin/channel/types'
 import type { AdminGroup, GroupPlatform } from '@/types'
 import type { Column } from '@/components/common/types'
@@ -865,25 +953,7 @@ function toggleGroupInSection(sectionIdx: number, groupId: number) {
 
 // ── Pricing helpers ──
 function addPricingEntry(sectionIdx: number) {
-  form.platforms[sectionIdx].model_pricing.push({
-    models: [],
-    billing_mode: 'token',
-    price_multiplier: null,
-    fast_mode_multiplier: null,
-    fast_multiplier: null,
-    flex_multiplier: null,
-    max_reasoning_effort_multiplier: null,
-    input_price: null,
-    output_price: null,
-    cache_write_price: null,
-    cache_write_1h_price: null,
-    cache_read_price: null,
-    image_input_price: null,
-    image_output_price: null,
-    per_request_price: null,
-    intervals: [],
-    time_pricing: createDefaultTimePricingForm()
-  })
+  form.platforms[sectionIdx].model_pricing.push(createEmptyPricingEntry())
 }
 
 const syncingPlatform = ref<string | null>(null)
@@ -959,6 +1029,134 @@ async function syncLatestModels(sectionIdx: number) {
   } finally {
     syncingPlatform.value = null
   }
+}
+
+// ── 同步账号支持模型（渠道价卡对齐该渠道下账号的已知模型并集）──
+
+const syncingAccountModels = ref<string | null>(null)
+
+interface AccountModelSyncState {
+  show: boolean
+  sectionIdx: number
+  loading: boolean
+  refreshUpstream: boolean
+  /** 并集中渠道价卡没有的模型（新增，显式填 0） */
+  added: string[]
+  /** 并集中渠道已有配置的模型（复用原价卡） */
+  reused: string[]
+  /** 渠道价卡有、但并集中没有的模型（将被移除） */
+  removed: string[]
+}
+
+const accountModelSync = reactive<AccountModelSyncState>({
+  show: false,
+  sectionIdx: -1,
+  loading: false,
+  refreshUpstream: false,
+  added: [],
+  reused: [],
+  removed: []
+})
+
+// collectAccountsForGroups 拉取指定分组下的全部账号（按分页取全）。
+async function collectAccountsForGroups(groupIds: number[]): Promise<Account[]> {
+  const all: Account[] = []
+  for (const gid of groupIds) {
+    let page = 1
+    for (;;) {
+      const res = await adminAPI.accounts.list(page, 100, { group: String(gid) })
+      all.push(...res.items)
+      if (res.items.length === 0 || all.length >= res.total) break
+      page += 1
+    }
+  }
+  return all
+}
+
+// accountModelWhitelist 读取账号的已知支持模型（credentials.model_whitelist）。
+function accountModelWhitelist(account: Account): string[] {
+  const raw = (account.credentials as Record<string, unknown> | undefined)?.model_whitelist
+  if (!Array.isArray(raw)) return []
+  return raw.map(value => String(value).trim()).filter(Boolean)
+}
+
+// analyzeAccountModelSync 计算账号模型并集与渠道价卡的差异；refreshUpstream 为真时先覆盖刷新账号白名单。
+async function analyzeAccountModelSync(sectionIdx: number, refreshUpstream: boolean) {
+  const platform = form.platforms[sectionIdx].platform
+  if (syncingAccountModels.value) return
+  syncingAccountModels.value = platform
+  accountModelSync.loading = true
+  try {
+    const groupIds = form.platforms[sectionIdx].group_ids
+    if (groupIds.length === 0) {
+      appStore.showInfo(t('admin.channels.form.syncAccountModelsNoGroups'))
+      return
+    }
+    const accounts = await collectAccountsForGroups(groupIds)
+    if (accounts.length === 0) {
+      appStore.showInfo(t('admin.channels.form.syncAccountModelsNoAccounts'))
+      return
+    }
+    if (refreshUpstream) {
+      // 覆盖式刷新：空结果不改白名单并报错，此时中止整体同步避免用不完整的并集覆盖价卡。
+      for (const account of accounts) {
+        try {
+          await adminAPI.accounts.syncUpstreamModels(account.id, { apply: true })
+        } catch (error) {
+          appStore.showError(t('admin.channels.form.syncAccountModelsRefreshFailed', {
+            name: account.name,
+            message: extractApiErrorMessage(error, '')
+          }))
+          return
+        }
+      }
+    }
+
+    const union = new Set<string>()
+    for (const account of accounts) {
+      for (const model of accountModelWhitelist(account)) union.add(model)
+    }
+    if (union.size === 0) {
+      appStore.showInfo(t('admin.channels.form.syncAccountModelsEmpty'))
+      return
+    }
+
+    const currentModels = form.platforms[sectionIdx].model_pricing.flatMap(entry => entry.models)
+    const diff = diffAccountModels(union, currentModels)
+    accountModelSync.sectionIdx = sectionIdx
+    accountModelSync.refreshUpstream = refreshUpstream
+    accountModelSync.added = diff.added
+    accountModelSync.reused = diff.reused
+    accountModelSync.removed = diff.removed
+    accountModelSync.show = true
+  } catch (error) {
+    appStore.showError(extractApiErrorMessage(error, t('admin.channels.form.syncAccountModelsError')))
+  } finally {
+    accountModelSync.loading = false
+    syncingAccountModels.value = null
+  }
+}
+
+function openAccountModelSync(sectionIdx: number) {
+  return analyzeAccountModelSync(sectionIdx, false)
+}
+
+function onRefreshUpstreamChange(sectionIdx: number, checked: boolean) {
+  return analyzeAccountModelSync(sectionIdx, checked)
+}
+
+// applyAccountModelSync 用并集覆盖渠道价卡（保留已有价格、新增填 0、并集外移除）。
+function applyAccountModelSync() {
+  const sectionIdx = accountModelSync.sectionIdx
+  if (sectionIdx < 0) return
+  const section = form.platforms[sectionIdx]
+  const union = normalizeModelNames([...accountModelSync.reused, ...accountModelSync.added])
+  section.model_pricing = applyAccountModelsToPricing(section.model_pricing, union)
+  accountModelSync.show = false
+  appStore.showSuccess(t('admin.channels.form.syncAccountModelsApplied', {
+    added: accountModelSync.added.length,
+    removed: accountModelSync.removed.length
+  }))
 }
 
 function updatePricingEntry(sectionIdx: number, idx: number, updated: PricingFormEntry) {

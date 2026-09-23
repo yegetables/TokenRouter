@@ -2933,6 +2933,9 @@ func (h *AccountHandler) SyncUpstreamModels(c *gin.Context) {
 		return
 	}
 
+	// apply=true 时用上游结果覆盖账号的最终模型白名单（覆盖式，非追加）。
+	apply := parseBoolQueryWithDefault(c.Query("apply"), false)
+
 	models, metadata, err := h.accountTestService.FetchUpstreamModelCatalog(c.Request.Context(), account)
 	var catalogErr *service.UpstreamModelSyncError
 	if err != nil && errors.As(err, &catalogErr) && catalogErr.Kind == service.UpstreamModelSyncErrorUnsupported {
@@ -2966,7 +2969,56 @@ func (h *AccountHandler) SyncUpstreamModels(c *gin.Context) {
 		}
 	}
 
+	if apply {
+		applied, applyErr := h.applyUpstreamModelWhitelist(c, account, models)
+		if applyErr != nil {
+			response.ErrorFrom(c, applyErr)
+			return
+		}
+		models = applied
+	}
+
 	response.Success(c, gin.H{"models": models})
+}
+
+// accountModelWhitelistCredentialKey 是账号最终模型白名单在 credentials 中的键名。
+const accountModelWhitelistCredentialKey = "model_whitelist"
+
+// applyUpstreamModelWhitelist 用上游模型列表覆盖账号的最终模型白名单（覆盖式，非追加）。
+// 上游返回空列表视为获取失败：不改动白名单并返回 502。
+func (h *AccountHandler) applyUpstreamModelWhitelist(c *gin.Context, account *service.Account, models []string) ([]string, error) {
+	normalized := make([]string, 0, len(models))
+	seen := make(map[string]struct{}, len(models))
+	for _, model := range models {
+		model = strings.TrimSpace(model)
+		if model == "" {
+			continue
+		}
+		if _, ok := seen[model]; ok {
+			continue
+		}
+		seen[model] = struct{}{}
+		normalized = append(normalized, model)
+	}
+	if len(normalized) == 0 {
+		return nil, infraerrors.New(http.StatusBadGateway, "UPSTREAM_MODELS_EMPTY",
+			"upstream returned no models; model whitelist unchanged")
+	}
+
+	// 非敏感键由 incoming 全量决定，必须整份回写；敏感键（如 api_key）省略即保留。
+	credentials := make(map[string]any, len(account.Credentials)+1)
+	for key, value := range account.Credentials {
+		if service.IsSensitiveCredentialKey(key) {
+			continue
+		}
+		credentials[key] = value
+	}
+	credentials[accountModelWhitelistCredentialKey] = normalized
+
+	if _, err := h.adminService.UpdateAccount(c.Request.Context(), account.ID, &service.UpdateAccountInput{Credentials: credentials}); err != nil {
+		return nil, err
+	}
+	return normalized, nil
 }
 
 // SyncUpstreamModelsPreview 使用未保存账号的临时凭证同步上游实时支持模型列表。

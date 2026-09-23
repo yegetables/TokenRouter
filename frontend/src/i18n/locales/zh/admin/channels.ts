@@ -516,7 +516,23 @@ riskControl: {
         syncingModels: '同步中...',
         syncModelsSuccess: '已同步 {count} 个新模型',
         syncModelsAlreadyUpToDate: '模型列表已是最新',
-        syncModelsError: '同步模型失败'
+        syncModelsError: '同步模型失败',
+        syncAccountModels: '同步账号支持模型',
+        syncingAccountModels: '同步中...',
+        syncAccountModelsTitle: '同步账号支持模型',
+        syncAccountModelsHint: '将用该渠道下账号的已知支持模型并集覆盖渠道模型价卡：已有模型复用原价格，新增模型填 0（免费），并集外的模型将被移除。',
+        syncAccountModelsRefreshUpstream: '同时从上游刷新账号支持模型（覆盖式，空结果不改并报错）',
+        syncAccountModelsAdded: '新增模型（{count}）',
+        syncAccountModelsReused: '复用原价格（{count}）',
+        syncAccountModelsRemoved: '将移除（{count}）',
+        syncAccountModelsNone: '无',
+        syncAccountModelsConfirm: '覆盖渠道价卡',
+        syncAccountModelsEmpty: '账号没有已知支持模型，未做改动',
+        syncAccountModelsNoGroups: '请先为该渠道选择分组',
+        syncAccountModelsNoAccounts: '该渠道的分组下没有账号',
+        syncAccountModelsRefreshFailed: '刷新账号「{name}」上游模型失败：{message}',
+        syncAccountModelsError: '同步账号支持模型失败',
+        syncAccountModelsApplied: '已覆盖渠道价卡：新增 {added} 个、移除 {removed} 个模型（保存渠道后生效）'
       }
     },
 // Subscriptions Management
