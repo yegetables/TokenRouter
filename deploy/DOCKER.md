@@ -3,7 +3,7 @@
 TokenRouter 会向 GitHub Container Registry 发布多架构镜像：
 
 ```text
-ghcr.io/tokenflux/tokenrouter:latest
+ghcr.io/yegetables/tokenrouter:latest
 ```
 
 应用依赖 PostgreSQL 和 Redis。推荐使用 Docker Compose 提供完整的运行配置、持久化存储、健康检查和依赖启动顺序。
