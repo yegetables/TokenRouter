@@ -114,6 +114,60 @@ func TestCreativeOpenAIImageSize(t *testing.T) {
 	require.Equal(t, "3264x2448", creativeOpenAIImageSize("4K", "4:3"))
 }
 
+// TestCreativeOpenAIImageRequestSize 校验第三方兼容生图模型的 size 契约：
+// 比例式模型传比例串，像素式模型与 GPT Image 传 WIDTHxHEIGHT。
+func TestCreativeOpenAIImageRequestSize(t *testing.T) {
+	// 比例式：baipiao gemini-3.1-flash-lite-image。
+	require.Equal(t, "9:16", creativeOpenAIImageRequestSize("gemini-3.1-flash-lite-image", "1K", "9:16"))
+	require.Equal(t, "2:3", creativeOpenAIImageRequestSize("gemini-3.1-flash-lite-image", "1K", "2:3"))
+	// 未登记比例回退契约首项 1:1。
+	require.Equal(t, "1:1", creativeOpenAIImageRequestSize("gemini-3.1-flash-lite-image", "1K", "16:9"))
+	require.Equal(t, "1:1", creativeOpenAIImageRequestSize("gemini-3.1-flash-lite-image", "1K", ""))
+
+	// 像素式：基元律动 qwen-image-2.0 / wan2.7-image。
+	require.Equal(t, "1024x1024", creativeOpenAIImageRequestSize("qwen-image-2.0", "1K", "1:1"))
+	require.Equal(t, "1536x1024", creativeOpenAIImageRequestSize("qwen-image-2.0", "1K", "16:9"))
+	require.Equal(t, "1024x1024", creativeOpenAIImageRequestSize("wan2.7-image", "1K", "1:1"))
+
+	// GPT Image 原生族保持像素尺寸。
+	require.Equal(t, "1024x1024", creativeOpenAIImageRequestSize("gpt-image-2", "1K", "1:1"))
+}
+
+// TestCreativeOpenAICompatImageProfile 校验第三方生图模型的能力与请求契约登记。
+func TestCreativeOpenAICompatImageProfile(t *testing.T) {
+	gemini := creativeCapabilitiesForModel(PlatformOpenAI, "gemini-3.1-flash-lite-image")
+	require.Equal(t, []string{"1:1", "2:3", "9:16", "4:3"}, gemini.aspectRatios)
+	require.Equal(t, 1, gemini.maxReferenceImages)
+	require.Empty(t, gemini.qualities)
+	require.Empty(t, gemini.backgroundOptions)
+
+	qwen := creativeCapabilitiesForModel(PlatformOpenAI, "qwen-image-2.0")
+	require.NotEmpty(t, qwen.aspectRatios)
+	require.Equal(t, 1, qwen.maxReferenceImages)
+
+	// 比例式第三方模型固定 1K 档位；像素式模型保留平台档位。
+	require.Equal(t, []string{"1K"}, creativeImageSizesForGroupModel(&Group{Platform: PlatformOpenAI}, "gemini-3.1-flash-lite-image"))
+	require.NotEmpty(t, creativeImageSizesForGroupModel(&Group{Platform: PlatformOpenAI}, "qwen-image-2.0"))
+
+	// 响应契约：像素式第三方模型默认只回 url，必须显式索要 base64。
+	require.True(t, creativeOpenAIUsesResponseFormat("qwen-image-2.0"))
+	require.True(t, creativeOpenAIUsesResponseFormat("wan2.7-image"))
+	require.False(t, creativeOpenAIUsesResponseFormat("gemini-3.1-flash-lite-image"))
+	require.False(t, creativeOpenAIUsesResponseFormat("gpt-image-2"))
+	require.True(t, creativeOpenAIUsesResponseFormat("dall-e-3"))
+
+	// output_format 只发给 GPT Image 原生族，第三方模型不发送未知参数。
+	require.False(t, creativeOpenAISendsOutputFormat("gemini-3.1-flash-lite-image"))
+	require.False(t, creativeOpenAISendsOutputFormat("qwen-image-2.0"))
+	require.True(t, creativeOpenAISendsOutputFormat("gpt-image-2"))
+
+	// 未登记模型不进入第三方分支。
+	require.Nil(t, creativeOpenAICompatImageProfileFor("some-text-model"))
+	require.False(t, isCreativeOpenAIImageModel("some-text-model"))
+	require.True(t, isCreativeOpenAIImageModel("gpt-image-1"))
+	require.True(t, isCreativeOpenAIImageModel("wan2.7-image"))
+}
+
 // TestCreativeGrokOperationMatrix grok 平台支持 generate 与 edit，但不支持 inpaint。
 func TestCreativeGrokOperationMatrix(t *testing.T) {
 	executor := &CreativeExecutor{}

@@ -417,7 +417,16 @@ func creativeCapabilitiesForModel(platform, model string) creativeModelCapabilit
 	normalizedModel := creativeNormalizedModelID(model)
 	switch normalizedPlatform {
 	case PlatformOpenAI:
-		if !IsGPTImageGenerationModel(normalizedModel) {
+		if !isCreativeOpenAIImageModel(normalizedModel) {
+			return capabilities
+		}
+		if profile := creativeOpenAICompatImageProfileFor(normalizedModel); profile != nil {
+			// 第三方兼容生图模型只暴露其真实支持的比例，编辑源图上限按契约收窄；
+			// quality/background 不支持，留空后上游请求不会携带这些字段。
+			capabilities.aspectRatios = append([]string(nil), profile.aspectRatios...)
+			if profile.maxReferenceImages > 0 {
+				capabilities.maxReferenceImages = profile.maxReferenceImages
+			}
 			return capabilities
 		}
 		capabilities.aspectRatios = []string{"1:1", "4:3", "3:4", "16:9", "9:16"}
@@ -503,6 +512,12 @@ func creativeFilterImageSizesForModel(platform, model string, sizes []string) []
 	platform = strings.TrimSpace(platform)
 	if platform == PlatformGrok && isGrokImageGenerationModel(model) {
 		return creativeFilterImageSizes(sizes, ImageBillingSize1K, ImageBillingSize2K)
+	}
+	if platform == PlatformOpenAI {
+		if profile := creativeOpenAICompatImageProfileFor(model); profile != nil && profile.sizeAsRatio {
+			// 比例式第三方生图模型的分辨率档位无意义（比例由请求 size 表达），固定 1K。
+			return creativeFilterImageSizes(sizes, ImageBillingSize1K)
+		}
 	}
 	if platform == PlatformOpenAI && IsGPTImageGenerationModel(model) && !isCreativeGPTImage2Model(model) {
 		return creativeFilterImageSizes(sizes, ImageBillingSize1K, ImageBillingSize2K)
@@ -636,7 +651,7 @@ func (s *CreativePublicService) creativeModelsForGroup(ctx context.Context, grou
 				}
 			}
 		case PlatformOpenAI:
-			for _, model := range creativeExpandAccountModels(account, defaultCreativeOpenAIModelCandidates(), IsGPTImageGenerationModel) {
+			for _, model := range creativeExpandAccountModels(account, defaultCreativeOpenAIModelCandidates(), isCreativeOpenAIImageModel) {
 				out[model] = resolveAccountMappedModelForForward(account, model)
 			}
 		case PlatformGrok:

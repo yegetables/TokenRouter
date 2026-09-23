@@ -373,6 +373,32 @@ func creativeOpenAIImageSize(imageSize, aspectRatio string) string {
 	}
 }
 
+// creativeOpenAICompatImageSizeValue 返回比例式第三方生图模型接受的 size 比例值，
+// 未知比例回退契约的第一项（无契约时回退 1:1）。
+func creativeOpenAICompatImageSizeValue(profile *creativeOpenAICompatImageProfile, aspectRatio string) string {
+	if profile != nil {
+		ratio := strings.TrimSpace(aspectRatio)
+		for _, supported := range profile.aspectRatios {
+			if ratio == supported {
+				return ratio
+			}
+		}
+		if len(profile.aspectRatios) > 0 {
+			return profile.aspectRatios[0]
+		}
+	}
+	return "1:1"
+}
+
+// creativeOpenAIImageRequestSize 返回 OpenAI 兼容 images 请求的 size 取值：
+// GPT Image 与像素式第三方模型用 WIDTHxHEIGHT；比例式第三方模型用比例串。
+func creativeOpenAIImageRequestSize(model, imageSize, aspectRatio string) string {
+	if profile := creativeOpenAICompatImageProfileFor(model); profile != nil && profile.sizeAsRatio {
+		return creativeOpenAICompatImageSizeValue(profile, aspectRatio)
+	}
+	return creativeOpenAIImageSize(imageSize, aspectRatio)
+}
+
 // creativeGrokImageResolution 把尺寸档位映射为 grok imagine 的 resolution（1k/2k）。
 func creativeGrokImageResolution(imageSize string) string {
 	if NormalizeImageBillingTierOrDefault(imageSize) == ImageBillingSize1K {

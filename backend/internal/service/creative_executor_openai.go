@@ -93,11 +93,13 @@ func (e *CreativeExecutor) creativeOpenAIURL(account *Account, endpoint string) 
 func buildCreativeOpenAIRequestBody(run CreativeRun, payload CreativeRunPayload, upstreamModel string) ([]byte, string, error) {
 	if run.Operation == CreativeOperationGenerate {
 		bodyMap := map[string]any{
-			"model":         upstreamModel,
-			"prompt":        payload.Prompt,
-			"n":             1,
-			"output_format": "png",
-			"size":          creativeOpenAIImageSize(run.ImageSize, run.AspectRatio),
+			"model":  upstreamModel,
+			"prompt": payload.Prompt,
+			"n":      1,
+			"size":   creativeOpenAIImageRequestSize(upstreamModel, run.ImageSize, run.AspectRatio),
+		}
+		if creativeOpenAISendsOutputFormat(upstreamModel) {
+			bodyMap["output_format"] = "png"
 		}
 		if creativeOpenAIUsesResponseFormat(upstreamModel) {
 			bodyMap["response_format"] = "b64_json"
@@ -146,10 +148,12 @@ func buildCreativeOpenAIRequestBody(run CreativeRun, payload CreativeRunPayload,
 			return nil, "", err
 		}
 	}
-	if err := writer.WriteField("output_format", "png"); err != nil {
-		return nil, "", err
+	if creativeOpenAISendsOutputFormat(upstreamModel) {
+		if err := writer.WriteField("output_format", "png"); err != nil {
+			return nil, "", err
+		}
 	}
-	if err := writer.WriteField("size", creativeOpenAIImageSize(run.ImageSize, run.AspectRatio)); err != nil {
+	if err := writer.WriteField("size", creativeOpenAIImageRequestSize(upstreamModel, run.ImageSize, run.AspectRatio)); err != nil {
 		return nil, "", err
 	}
 	if err := writer.WriteField("n", "1"); err != nil {
@@ -171,9 +175,20 @@ func buildCreativeOpenAIRequestBody(run CreativeRun, payload CreativeRunPayload,
 	return buffer.Bytes(), writer.FormDataContentType(), nil
 }
 
-// creativeOpenAIUsesResponseFormat 仅对 DALL-E 保留旧版 response_format 参数；GPT Image 固定返回 base64。
+// creativeOpenAIUsesResponseFormat 判断是否需要显式请求 base64 输出：
+// DALL-E 保留旧版 response_format 参数；已登记第三方模型按契约显式索要 b64_json。
 func creativeOpenAIUsesResponseFormat(model string) bool {
-	return strings.HasPrefix(strings.ToLower(strings.TrimSpace(model)), "dall-e")
+	if strings.HasPrefix(strings.ToLower(strings.TrimSpace(model)), "dall-e") {
+		return true
+	}
+	profile := creativeOpenAICompatImageProfileFor(model)
+	return profile != nil && profile.requireResponseFormat
+}
+
+// creativeOpenAISendsOutputFormat 判断是否发送 GPT Image 专有的 output_format 参数；
+// 第三方兼容模型不发送，避免上游因未知参数报错。
+func creativeOpenAISendsOutputFormat(model string) bool {
+	return !isCreativeOpenAIThirdPartyImageModel(model)
 }
 
 // parseCreativeOpenAIImageOutputs 解析 OpenAI images 响应（grok 同结构）的 data[].b64_json。
