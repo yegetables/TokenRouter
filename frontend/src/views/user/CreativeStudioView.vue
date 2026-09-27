@@ -3,7 +3,7 @@
     <!-- 整个内容区即无限画布背景:fullViewport 模式下 app-main 无内边距,画布经 flex 链铺满全幅(含顶部,点阵直达 header 边界) -->
     <div ref="stageRef" class="relative h-full min-h-0">
       <CreativeCanvas ref="canvasRef" class="absolute inset-0" :operation="studio.operation.value" :allowed-mimes="studio.capabilities.value.allowed_mime_types" @error="onCanvasError" />
-      <CreativeRunHistory ref="historyRef" :studio="studio" :active-run-count="activeRunCount" />
+      <CreativeRunHistory ref="historyRef" :studio="studio" :active-run-count="activeRunCount" @retry="onRetryRun" />
 
       <!-- 设置：左上角齿轮按钮，点击向下展开设置项 -->
       <div class="absolute left-3 top-3 z-20">
@@ -309,6 +309,14 @@ async function onGenerate(): Promise<void> {
   }
   const submitted = await studio.createRun({ sourceBlobs, maskBlob })
   if (!submitted) cancelSubmissionAnimation()
+}
+
+// 历史里失败任务的重试：先用本地快照还原输入区（提示词与参数），
+// 再走与点击生成完全相同的画布采集与提交路径，避免维护第二条提交分支。
+async function onRetryRun(runId: string): Promise<void> {
+  const restored = await studio.restoreRunInput(runId)
+  if (!restored) return
+  await onGenerate()
 }
 
 function onCanvasError(message: string): void {

@@ -161,6 +161,16 @@
                     </div>
                   </template>
                   <p v-else class="py-1 text-xs text-gray-400 dark:text-dark-400">{{ t('creative.history.noOutputs') }}</p>
+                  <button
+                    v-if="canRetry(run)"
+                    type="button"
+                    data-testid="creative-run-retry"
+                    class="flex w-full items-center justify-center gap-1 rounded-control border border-primary-900/10 px-2 py-1 text-xs text-gray-600 transition-colors hover:border-primary-500 hover:text-primary-600 dark:border-dark-600 dark:text-gray-300 dark:hover:border-primary-500 dark:hover:text-primary-300"
+                    @click="emit('retry', run.id)"
+                  >
+                    <Icon name="refresh" size="sm" />
+                    {{ t('creative.history.retry') }}
+                  </button>
                 </div>
               </div>
             </div>
@@ -205,6 +215,7 @@ interface Props {
 const props = withDefaults(defineProps<Props>(), {
   activeRunCount: 0,
 })
+const emit = defineEmits<{ retry: [runId: string] }>()
 // 本地别名：studio 为 props 传入的共享状态机，子组件经它读写
 const studio = props.studio
 const { t } = useI18n()
@@ -304,6 +315,11 @@ function downloadOutput(runId: string, outputIndex: number, mimeType?: string): 
 
 function isActive(run: CreativeRun): boolean {
   return !CREATIVE_RUN_TERMINAL_STATUSES.includes(run.status)
+}
+
+// 失败 / 取消 / 结果丢失的任务可重试；成功任务没有重试语义，进行中任务不提供操作。
+function canRetry(run: CreativeRun): boolean {
+  return CREATIVE_RUN_TERMINAL_STATUSES.includes(run.status) && run.status !== 'succeeded'
 }
 
 // 后端时间戳兼容秒 / 毫秒。
