@@ -45,6 +45,9 @@ jobs:
         id: meta
         run: |
           set -euo pipefail
+          # 版本与 revision 都必须取自 checkout 后的真实提交：
+          # workflow_dispatch 时 github.sha 是「派发所在分支」的提交，不是构建内容。
+          revision="$(git rev-parse HEAD)"
           short_sha="$(git rev-parse --short HEAD)"
           base_version="$(tr -d '[:space:]' < backend/cmd/server/VERSION)"
           suffix="${{ github.event.inputs.version_suffix }}"
@@ -56,9 +59,10 @@ jobs:
           {
             echo "image=${image}"
             echo "version=${base_version}-${suffix}"
+            echo "revision=${revision}"
             echo "short_sha=${short_sha}"
           } >> "$GITHUB_OUTPUT"
-          echo "将构建 ${image}:dev（版本 ${base_version}-${suffix}）"
+          echo "将构建 ${image}:dev（版本 ${base_version}-${suffix}，revision ${revision}）"
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -85,7 +89,7 @@ jobs:
             COMMIT=${{ steps.meta.outputs.short_sha }}
           labels: |
             org.opencontainers.image.version=${{ steps.meta.outputs.version }}
-            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.revision=${{ steps.meta.outputs.revision }}
             org.opencontainers.image.source=https://github.com/${{ github.repository }}
           cache-from: type=gha,scope=dev-image
           cache-to: type=gha,scope=dev-image,mode=max
@@ -99,7 +103,7 @@ jobs:
             echo "| --- | --- |"
             echo "| 镜像 | \`${{ steps.meta.outputs.image }}:dev\` |"
             echo "| 版本 | \`${{ steps.meta.outputs.version }}\` |"
-            echo "| 提交 | \`${{ github.sha }}\` |"
+            echo "| 构建提交 | \`${{ steps.meta.outputs.revision }}\` |"
             echo
             echo "开发实例更新："
             echo
