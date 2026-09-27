@@ -51,6 +51,25 @@ func (config *TimePricingConfig) MultiplierAt(at time.Time, location *time.Locat
 	return 1.0
 }
 
+// ModelDisplayTimePricingAt 返回 at 时刻生效的分时倍率展示快照。
+// 未配置、配置非法或缺少时区时返回 nil，与 MultiplierAt 的安全降级保持一致。
+func ModelDisplayTimePricingAt(config *TimePricingConfig, at time.Time, location *time.Location) *ModelDisplayTimePricing {
+	if config == nil || len(config.Periods) == 0 || at.IsZero() || location == nil {
+		return nil
+	}
+	if err := ValidateTimePricingConfig(config); err != nil {
+		return nil
+	}
+	periods := make([]TimePricingPeriod, len(config.Periods))
+	copy(periods, config.Periods)
+	return &ModelDisplayTimePricing{
+		Timezone:         config.Timezone,
+		WeekdaysOnly:     config.WeekdaysOnly,
+		Periods:          periods,
+		ActiveMultiplier: config.MultiplierAt(at, location),
+	}
+}
+
 func ParsePricingTime(value string, end bool) (int, error) {
 	if end && (value == "00:00" || value == "00:00:00") {
 		return 24 * 60 * 60, nil

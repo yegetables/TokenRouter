@@ -267,6 +267,39 @@ func (s *Calculator) imageDisplayPricingWithResolved(model string, rateMultiplie
 	return result, found
 }
 
+// DisplayPricingForQuote 计算模型广场展示价：在分组倍率上叠加当前时刻的分时与高峰因子，
+// 与结算使用同一份配置和同一取时口径，使展示价即当前实际扣费单价；并附带时段快照供前端标注。
+func (s *Calculator) DisplayPricingForQuote(model string, rateMultiplier float64, resolved *ResolvedPricing, settings purepricing.BillingSettings) ModelDisplayPricing {
+	at := s.options.Now()
+	config := resolvedTimePricingConfig(resolved)
+	var location *time.Location
+	if config != nil {
+		location, _ = s.options.LoadLocation(config.Timezone)
+	}
+	// 高峰因子与结算口径一致：只有 token 模式叠加，图片/按次/视频保持基础倍率。
+	peak := 1.0
+	if resolved.Mode == purepricing.BillingModeToken {
+		peak = settings.PeakMultiplierAt(at)
+	}
+	// 总倍率只在这里算一次：既乘进展示价，也随快照下发，前端不按同一份配置重复相乘。
+	factor := purepricing.ResolvedTimeMultiplier(resolved, at, location) * peak
+	display := s.DisplayPricingWithResolvedMultipliers(model, rateMultiplier*factor, resolved)
+	display.ActiveMultiplier = factor
+	display.TimePricing = purepricing.ModelDisplayTimePricingAt(config, at, location)
+	if resolved.Mode == purepricing.BillingModeToken {
+		display.PeakRate = settings.ModelDisplayPeakRateAt(at)
+	}
+	return display
+}
+
+// resolvedTimePricingConfig 读取生效价卡的分时配置；未配置时返回 nil。
+func resolvedTimePricingConfig(resolved *ResolvedPricing) *purepricing.TimePricingConfig {
+	if resolved == nil || resolved.ConfigPricing == nil {
+		return nil
+	}
+	return resolved.ConfigPricing.TimePricing
+}
+
 // displayPricingFromResolved 委托纯定价实现，旧查询与配置投影保留在适配层。
 func displayPricingFromResolved(model string, rateMultiplier float64, resolved *ResolvedPricing) (ModelDisplayPricing, bool) {
 	return purepricing.DisplayPricingFromResolved(model, rateMultiplier, resolved)

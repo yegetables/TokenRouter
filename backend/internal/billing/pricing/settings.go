@@ -57,6 +57,25 @@ func (s BillingSettings) Clone() BillingSettings {
 	return s
 }
 
+// ModelDisplayPeakRateAt 返回 at 时刻的高峰窗口展示快照。
+// 未启用或配置非法时返回 nil，与 PeakMultiplierAt 的安全降级保持一致。
+func (g *BillingSettings) ModelDisplayPeakRateAt(at time.Time) *ModelDisplayPeakRate {
+	if g == nil || !g.PeakRateEnabled || g.PeakStart == "" || g.PeakEnd == "" {
+		return nil
+	}
+	start, ok1 := parseMinutes(g.PeakStart)
+	end, ok2 := parseMinutes(g.PeakEnd)
+	if !ok1 || !ok2 || start >= end {
+		return nil
+	}
+	return &ModelDisplayPeakRate{
+		StartTime:  g.PeakStart,
+		EndTime:    g.PeakEnd,
+		Multiplier: g.PeakRateMultiplier,
+		Active:     g.PeakMultiplierAt(at) != 1,
+	}
+}
+
 // parseMinutes 把 "HH:MM" 解析为当日分钟数（0..1439），格式非法返回 (0,false)。
 func parseMinutes(hhmm string) (int, bool) {
 	// 手工解析避免计费热路径反复走 time.Parse；接受集保持与 time.Parse("15:04", s) 一致：

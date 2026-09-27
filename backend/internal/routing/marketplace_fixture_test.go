@@ -6,6 +6,7 @@ import (
 
 	"github.com/TokenFlux/TokenRouter/internal/billing"
 	"github.com/TokenFlux/TokenRouter/internal/billing/pricing"
+	billingadapter "github.com/TokenFlux/TokenRouter/internal/billing/provider"
 	billingtestkit "github.com/TokenFlux/TokenRouter/internal/billing/testkit"
 	"github.com/TokenFlux/TokenRouter/internal/gateway/provider/modelidentity"
 	catalogprovider "github.com/TokenFlux/TokenRouter/internal/modelcatalog/provider"
@@ -24,6 +25,14 @@ func newMarketplaceFixture(groups routing.MarketplaceGroups, settings routing.Ma
 
 func newMarketplaceCalculator(catalog *catalogprovider.Service, prices map[string]*pricing.ModelPricing) *billing.Calculator {
 	return billingtestkit.Calculator(0, catalog, prices)
+}
+
+// newMarketplaceCalculatorAt 用固定取时点构造计算器，供分时与高峰展示断言使用。
+func newMarketplaceCalculatorAt(at time.Time) *billing.Calculator {
+	return billing.NewCalculator(nil, billing.CalculatorOptions{
+		Now:          func() time.Time { return at },
+		LoadLocation: billingadapter.LoadPricingLocation,
+	})
 }
 
 func NewModelPricingResolver(pricingConfigs *routing.PricingConfigService, calculator *billing.Calculator) *billing.PriceResolver {

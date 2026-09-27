@@ -212,6 +212,49 @@ describe('ModelPricingPanel', () => {
     expect(wrapper.find('[data-testid="pricing-fast-switch"]').exists()).toBe(false)
     expect(wrapper.find('[data-testid="pricing-interval-switch"]').exists()).toBe(false)
   })
+
+  it('分时与高峰下发时展示当前档位角标、时段与当前生效价', async () => {
+    const wrapper = mountPanel(
+      marketplaceModel('m-peak', {
+        pricing_mode: 'token',
+        price_status: 'priced',
+        input_price_per_token: 0.000012,
+        output_price_per_token: 0.000048,
+        time_pricing: {
+          timezone: 'Asia/Shanghai',
+          weekdays_only: true,
+          periods: [{ start_time: '14:00', end_time: '18:00', multiplier: 3 }],
+          active_multiplier: 3,
+        },
+        peak_rate: { start_time: '14:00', end_time: '18:00', multiplier: 2, active: true },
+        // 总倍率由服务端下发（分时 3 × 高峰 2），前端只读取。
+        active_multiplier: 6,
+      }),
+    )
+
+    await wrapper.get('[data-testid="model-pricing-toggle"]').trigger('click')
+
+    // 当前生效倍率 = 分时 3 × 高峰 2，角标只反映当前档位。
+    const badge = wrapper.get('[data-testid="pricing-peak-badge"]')
+    expect(badge.text()).toContain('marketplace.pricingPeak')
+    expect(badge.text()).toContain('×6')
+
+    const windows = wrapper.findAll('[data-testid="pricing-peak-window"]').map((el) => el.text())
+    expect(windows).toContain('14:00–18:00 ×3')
+    expect(windows).toContain('marketplace.pricingWeekdaysOnly')
+    expect(windows).toContain('marketplace.pricingPeakWindow')
+
+    // 价格行即当前生效价：0.000012/Token = 12.00/百万。
+    expect(wrapper.text()).toContain('12.00')
+  })
+
+  it('无分时与高峰时不显示角标', async () => {
+    const wrapper = mountPanel(marketplaceModel('m-flat', tokenPricing))
+
+    await wrapper.get('[data-testid="model-pricing-toggle"]').trigger('click')
+
+    expect(wrapper.find('[data-testid="pricing-peak-row"]').exists()).toBe(false)
+  })
 })
 
 it('显示明确免费的图片尺寸，省略未定价尺寸', () => {

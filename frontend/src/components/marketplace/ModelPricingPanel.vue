@@ -65,6 +65,26 @@
           </div>
         </div>
 
+        <!-- 高峰期角标：展示价已含当前时段与高峰倍率，角标只读服务端下发的生效值。 -->
+        <div v-if="timePricing || peakRate" class="mb-3 flex flex-wrap items-center gap-2" data-testid="pricing-peak-row">
+          <span
+            class="inline-flex items-center rounded-compact px-2 py-0.5 text-xs font-semibold tabular-nums"
+            :class="activeTimeMultiplier > 1 ? peakBadgeActiveClass : peakBadgeInactiveClass"
+            data-testid="pricing-peak-badge"
+          >
+            {{ activeTimeMultiplier > 1 ? t('marketplace.pricingPeak') : t('marketplace.pricingOffPeak') }}
+            ×{{ formatMultiplier(activeTimeMultiplier) }}
+          </span>
+          <span
+            v-for="window in timeWindows"
+            :key="window"
+            class="rounded-compact bg-gray-100 px-2 py-0.5 text-xs text-gray-600 dark:bg-dark-800 dark:text-dark-300"
+            data-testid="pricing-peak-window"
+          >
+            {{ window }}
+          </span>
+        </div>
+
         <!-- 完整定价允许在窄卡片内换行，避免隐藏的抽屉也撑大父网格。 -->
         <div v-if="activeRows.length > 0" class="space-y-2.5" data-testid="pricing-rows">
           <div
@@ -261,6 +281,51 @@ const selectableIntervals = computed(() =>
 const activeIntervalIndex = computed(() =>
   Math.min(selectedIntervalIndex.value, Math.max(0, selectableIntervals.value.length - 1))
 )
+
+// —— 分时与高峰：展示价已是当前生效价，这里只用角标标注时段与当前档位 ——
+// 档位一律读服务端下发的生效值，不用浏览器时间推算，避免与结算口径不一致。
+
+const peakBadgeActiveClass = 'bg-amber-50 text-amber-700 dark:bg-amber-500/10 dark:text-amber-300'
+const peakBadgeInactiveClass = 'bg-emerald-50 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-300'
+
+function formatMultiplier(value: number): string {
+  return Number.isInteger(value) ? String(value) : String(Number(value.toFixed(2)))
+}
+
+// 分时时段是左闭右开区间；结束时间为 00:00 表示当日 24:00。
+function formatTimeRange(start: string, end: string): string {
+  const normalizedEnd = /^00:00(:00)?$/.test(end) ? '24:00' : end.slice(0, 5)
+  return `${start.slice(0, 5)}–${normalizedEnd}`
+}
+
+const timePricing = computed(() => {
+  const config = props.model.pricing.time_pricing
+  return config && config.periods.length > 0 ? config : null
+})
+
+const peakRate = computed(() => props.model.pricing.peak_rate ?? null)
+
+// 展示价实际计入的总倍率（分时 × 高峰）由服务端下发，前端不按同一份配置再乘一次。
+const activeTimeMultiplier = computed(() => props.model.pricing.active_multiplier ?? 1)
+
+// 时段标签：分时各段、限工作日与高峰窗口。
+const timeWindows = computed<string[]>(() => {
+  const windows = (timePricing.value?.periods ?? []).map(
+    (period) => `${formatTimeRange(period.start_time, period.end_time)} ×${formatMultiplier(period.multiplier)}`,
+  )
+  if (timePricing.value?.weekdays_only) {
+    windows.push(t('marketplace.pricingWeekdaysOnly'))
+  }
+  if (peakRate.value) {
+    windows.push(
+      t('marketplace.pricingPeakWindow', {
+        range: formatTimeRange(peakRate.value.start_time, peakRate.value.end_time),
+        multiplier: formatMultiplier(peakRate.value.multiplier),
+      }),
+    )
+  }
+  return windows
+})
 
 // 定价数据来源：选中区间优先，否则用模型顶层价格。
 const activeSource = computed<MarketplaceModelPricing | MarketplacePricingInterval>(() =>
