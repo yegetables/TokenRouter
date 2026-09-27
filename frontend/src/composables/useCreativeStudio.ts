@@ -453,8 +453,10 @@ export function useCreativeStudio() {
       const requestWorkspaceId = readWorkspaceId()
       const requestGeneration = workspaceGeneration
       // 同一表单提交意图复用同一幂等键，直到成功
+      // 明文 HTTP 下 crypto.randomUUID 不存在（该 API 仅安全上下文可用），
+      // 回退到时间戳加随机串；幂等键对服务端只是不透明字符串，与其它请求 ID 用同一写法。
       if (!activeIdempotencyKey.value) {
-        activeIdempotencyKey.value = crypto.randomUUID()
+        activeIdempotencyKey.value = globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(36).slice(2)}`
       }
       const form = new FormData()
       form.append('group_id', option.group_id)
