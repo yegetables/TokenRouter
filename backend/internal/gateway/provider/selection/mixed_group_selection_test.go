@@ -114,6 +114,20 @@ func TestMixedGroupImageCandidateUsesFinalMappedModel(t *testing.T) {
 	require.Empty(t, selector.candidateEligibilityReason(ctx, &value, "", "image-alias", false, ""))
 }
 
+// 回归：图片候选门禁原先用只认原生族的判定，把第三方兼容生图模型判成 image_model_required，
+// 使唯一账号也被剔除、请求以 503 结束。放行口径必须与图片入口门禁一致。
+func TestMixedGroupImageCandidateAllowsThirdPartyCompatModel(t *testing.T) {
+	selector := NewCompatible(CompatibleDependencies{}, DefaultOptions())
+	value := mixedGroupProvider(1, capability.PlatformOpenAI, "*", 91)
+	ctx := context.WithValue(context.Background(), imageModelRequiredKey{}, true)
+	for _, model := range []string{"gpt-image-1", "grok-imagine", "qwen-image-2.0", "wan2.7-image"} {
+		require.Empty(t, selector.candidateEligibilityReason(ctx, &value, "", model, false, ""), model)
+	}
+	for _, model := range []string{"glm-5.2", "deepseek-flash"} {
+		require.Equal(t, "image_model_required", selector.candidateEligibilityReason(ctx, &value, "", model, false, ""), model)
+	}
+}
+
 type mixedSessionLimits struct {
 	scheduler.SessionLimitCache
 	blocked int64

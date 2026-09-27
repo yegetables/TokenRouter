@@ -7,7 +7,9 @@ const CreativeMaxOutputBytes = 32 << 20
 func CreativePlatformImageModel(platform, model string) bool {
 	switch platform {
 	case PlatformOpenAI:
-		return upstream.IsGPTImageGenerationModel(model)
+		// GPT Image 原生族与已登记的第三方 OpenAI 兼容生图模型（qwen-image、wan2.7-image、
+		// gemini-3.1-flash-lite-image 等）；用统一判定避免目录能列出但执行器拒绝。
+		return IsCreativeOpenAIImageModel(model)
 	case PlatformGrok:
 		return upstream.IsGrokImageGenerationModel(model)
 	case PlatformGemini:
