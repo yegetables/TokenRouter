@@ -247,7 +247,7 @@ func (p openAITextHTTPBackend) MetadataSession(c *gin.Context, hash, key, model 
 }
 
 func (p openAITextHTTPBackend) ChatImageModel(model string, mapping routing.GroupMappingResult) bool {
-	return media.IsGPTImageGenerationModel(requeststate.GroupMappedModel(model, mapping))
+	return media.IsImageGenerationModel(requeststate.GroupMappedModel(model, mapping))
 }
 
 func (p openAITextHTTPBackend) ErrorMetadata(c *gin.Context) (string, string) {
