@@ -1,0 +1,109 @@
+name: Dev Image
+
+# 只推 :dev 标签，绝不触碰 :latest。
+#
+# 为什么必须独立于 release.yml：release.yml 在 v* tag 上由 GoReleaser 同时推
+# :<Version> / :<Major.Minor> / :<Major> / :latest 的多架构 manifest。生产实例是
+# pull_policy: always，所以只要推一次 v* tag，生产下次 compose up 就会自动升级。
+# 开发中的代码要走 :dev，就必须绕开那条链路。
+#
+# 上游 Dockerfile 是自包含的多阶段构建（自带前端 pnpm 构建 + Go 构建），
+# 不需要 GoReleaser 那套预编译产物，直接构建即可。
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: '构建来源：分支 / tag / commit SHA（留空 = 触发工作流时所在分支）'
+        required: false
+        type: string
+        default: ''
+      version_suffix:
+        description: '版本后缀（留空 = dev.<短sha>），用于在管理后台区分不同的 dev 构建'
+        required: false
+        type: string
+        default: ''
+
+permissions:
+  contents: read
+  packages: write
+
+# 串行化：两次 dev 构建同时推同一个标签只会互相覆盖。
+concurrency:
+  group: dev-image
+
+jobs:
+  dev-image:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.inputs.ref || github.ref }}
+
+      - name: Resolve image and version
+        id: meta
+        run: |
+          set -euo pipefail
+          short_sha="$(git rev-parse --short HEAD)"
+          base_version="$(tr -d '[:space:]' < backend/cmd/server/VERSION)"
+          suffix="${{ github.event.inputs.version_suffix }}"
+          if [ -z "$suffix" ]; then
+            suffix="dev.${short_sha}"
+          fi
+          # GHCR 要求仓库全小写，否则推送直接失败。
+          image="ghcr.io/$(echo '${{ github.repository }}' | tr '[:upper:]' '[:lower:]')"
+          {
+            echo "image=${image}"
+            echo "version=${base_version}-${suffix}"
+            echo "short_sha=${short_sha}"
+          } >> "$GITHUB_OUTPUT"
+          echo "将构建 ${image}:dev（版本 ${base_version}-${suffix}）"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.repository_owner }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push :dev
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile
+          # 部署机是 x86_64；只出 amd64 省时间，dev 不需要多架构。
+          platforms: linux/amd64
+          push: true
+          # 这里只会出现 :dev。任何情况下都不得加 :latest。
+          tags: ${{ steps.meta.outputs.image }}:dev
+          build-args: |
+            VERSION=${{ steps.meta.outputs.version }}
+            COMMIT=${{ steps.meta.outputs.short_sha }}
+          labels: |
+            org.opencontainers.image.version=${{ steps.meta.outputs.version }}
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+          cache-from: type=gha,scope=dev-image
+          cache-to: type=gha,scope=dev-image,mode=max
+
+      - name: Summary
+        run: |
+          {
+            echo "### Dev 镜像已推送"
+            echo
+            echo "| 项 | 值 |"
+            echo "| --- | --- |"
+            echo "| 镜像 | \`${{ steps.meta.outputs.image }}:dev\` |"
+            echo "| 版本 | \`${{ steps.meta.outputs.version }}\` |"
+            echo "| 提交 | \`${{ github.sha }}\` |"
+            echo
+            echo "开发实例更新："
+            echo
+            echo '```bash'
+            echo "cd ~/work/token-router-dev && docker compose up -d --pull always"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
