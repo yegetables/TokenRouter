@@ -144,3 +144,4 @@ output/
 .vite/
 # 本地计划文件目录（project-doc 计划，不提交）
 .agents/plans/
+.agents/channels
