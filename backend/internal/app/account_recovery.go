@@ -87,7 +87,7 @@ func provideAccountHealthRuntime(
 		ImageOnly: media.IsImageGenerationModel, LastSegment: capability.LastOpenAIModelSegment,
 		CanonicalAlias: capability.CanonicalizeOpenAIModelAliasSpelling, KnownModel: modelidentity.NormalizeOpenAI,
 		SupportsEffort: capability.OpenAIModelSupportsReasoningEffort,
-	}, IsImageModel: media.IsGPTImageGenerationModel}
+	}, IsImageModel: media.IsImageGenerationModel}
 
 	return &accountHealthRuntime{
 		Health: health, Recovery: recovery, Observer: &accountprovider.UpstreamHealth{Core: health, Team: team, Limits: limits, Models: models},

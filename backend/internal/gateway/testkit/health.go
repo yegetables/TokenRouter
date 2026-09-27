@@ -78,6 +78,6 @@ func NewHealthObserver(input HealthInput) *accountprovider.UpstreamHealth {
 			reset := account.GeminiDailyResetTime(time.Now(), location).Unix()
 			return &reset
 		}},
-		Models: &accountprovider.ModelHealth{Health: health, CodexRules: provider.CodexModelRules(), IsImageModel: media.IsGPTImageGenerationModel},
+		Models: &accountprovider.ModelHealth{Health: health, CodexRules: provider.CodexModelRules(), IsImageModel: media.IsImageGenerationModel},
 	}
 }

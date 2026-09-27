@@ -8,12 +8,14 @@ import (
 	"github.com/tidwall/gjson"
 )
 
-const OpenAIResponsesEndpoint = "/v1/responses"
-const OpenAIResponsesCompactEndpoint = "/v1/responses/compact"
-const ResponsesLiteHeader = "X-OpenAI-Internal-Codex-Responses-Lite"
-const ResponsesLiteHeaderKey = "x-openai-internal-codex-responses-lite"
-const ResponsesLiteWSMetadataKey = "ws_request_header_x_openai_internal_codex_responses_lite"
-const ImageGenerationPermissionMessage = "Image generation is not enabled for this group"
+const (
+	OpenAIResponsesEndpoint          = "/v1/responses"
+	OpenAIResponsesCompactEndpoint   = "/v1/responses/compact"
+	ResponsesLiteHeader              = "X-OpenAI-Internal-Codex-Responses-Lite"
+	ResponsesLiteHeaderKey           = "x-openai-internal-codex-responses-lite"
+	ResponsesLiteWSMetadataKey       = "ws_request_header_x_openai_internal_codex_responses_lite"
+	ImageGenerationPermissionMessage = "Image generation is not enabled for this group"
+)
 
 // ImageToolRules 复用平台纯解析函数，不保存配置、账号或平台可变状态。
 type ImageToolRules struct {
@@ -31,6 +33,7 @@ func NewImageIntentPolicy(rules ImageToolRules) ImageIntentPolicy {
 
 // GroupImagePermission 接收明确的存在性和权限位，保留无分组 Key 的行为。
 func GroupImagePermission(groupPresent, allowed bool) bool { return !groupPresent || allowed }
+
 func (p ImageIntentPolicy) IsOpenAIResponsesLiteHeader(value string) bool {
 	return strings.EqualFold(strings.TrimSpace(value), "true")
 }
@@ -485,11 +488,7 @@ func (p ImageIntentPolicy) ResolveOpenAIResponsesImageBillingConfigDetailedFromB
 }
 
 func (p ImageIntentPolicy) IsOpenAIImageBillingModelAlias(model string) bool {
-	normalized := strings.ToLower(strings.TrimSpace(model))
-	if normalized == "" {
-		return false
-	}
-	return IsImageGenerationModel(normalized) || strings.Contains(normalized, "image")
+	return IsImageBillingModelAlias(model)
 }
 
 func (p ImageIntentPolicy) OpenAIJSONString(value gjson.Result) string {

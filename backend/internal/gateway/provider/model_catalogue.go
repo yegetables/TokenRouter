@@ -7,6 +7,7 @@ import (
 
 	"github.com/TokenFlux/TokenRouter/internal/account"
 	accountprovider "github.com/TokenFlux/TokenRouter/internal/account/provider"
+	"github.com/TokenFlux/TokenRouter/internal/gateway/media"
 	"github.com/TokenFlux/TokenRouter/internal/gateway/requeststate"
 	"github.com/TokenFlux/TokenRouter/internal/routing"
 	"github.com/TokenFlux/TokenRouter/internal/routing/capability"
@@ -66,7 +67,8 @@ func (v catalogueRules) SupportsClientProtocol(model string, source capability.P
 	if embedding || source == capability.ProtocolEmbeddings {
 		return embedding && source == capability.ProtocolEmbeddings
 	}
-	image := upstream.IsGPTImageGenerationModel(model) || upstream.IsGrokImageGenerationModel(model)
+	// 与 images 端点放行、账号选路共用同一生图模型判定，第三方兼容生图模型不在这里被漏掉。
+	image := media.IsImageGenerationModel(model)
 	if source == capability.ProtocolImagesGenerations || source == capability.ProtocolImagesEdits {
 		return image
 	}

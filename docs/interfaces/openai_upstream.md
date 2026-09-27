@@ -84,6 +84,8 @@ OpenAI 平台拥有以下正式协议族：
 | Images | OpenAI 图片生成/编辑；当前网关保留同步生命周期，批量图片由 Gemini/Vertex 专题定义 |
 | Realtime/Live/sideband、Alpha Search | 仅 OpenAI 分组，并受分组开关、账号类型和 transport capability 限制 |
 
+`/v1/images/*` 的模型校验放行原生生图族与名称含 `image` 的 OpenAI 兼容第三方生图模型，与图片计费别名判定同一来源；普通文本模型仍被拒。
+
 <a id="images_url_backfill"></a>
 ### 图片结果回填
 

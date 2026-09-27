@@ -72,6 +72,7 @@ func (e *Target) ExecuteOpenAI(ctx context.Context, run creative.CreativeRun, pa
 	}
 	return ParseCreativeOpenAIImageOutputs(respBody)
 }
+
 func (e *Target) CreativeOpenAIURL(endpoint string) (string, error) { return e.OpenAI.URL(endpoint) }
 
 // BuildCreativeOpenAIRequestBody 构造 OpenAI images 请求体：
@@ -80,11 +81,13 @@ func (e *Target) CreativeOpenAIURL(endpoint string) (string, error) { return e.O
 func BuildCreativeOpenAIRequestBody(run creative.CreativeRun, payload creative.CreativeRunPayload, upstreamModel string) ([]byte, string, error) {
 	if run.Operation == creative.CreativeOperationGenerate {
 		bodyMap := map[string]any{
-			"model":         upstreamModel,
-			"prompt":        payload.Prompt,
-			"n":             1,
-			"output_format": "png",
-			"size":          CreativeOpenAIImageSize(run.ImageSize, run.AspectRatio),
+			"model":  upstreamModel,
+			"prompt": payload.Prompt,
+			"n":      1,
+			"size":   CreativeOpenAIRequestImageSize(upstreamModel, run.ImageSize, run.AspectRatio),
+		}
+		if CreativeOpenAISendsOutputFormat(upstreamModel) {
+			bodyMap["output_format"] = "png"
 		}
 		if CreativeOpenAIUsesResponseFormat(upstreamModel) {
 			bodyMap["response_format"] = "b64_json"
@@ -133,10 +136,12 @@ func BuildCreativeOpenAIRequestBody(run creative.CreativeRun, payload creative.C
 			return nil, "", err
 		}
 	}
-	if err := writer.WriteField("output_format", "png"); err != nil {
-		return nil, "", err
+	if CreativeOpenAISendsOutputFormat(upstreamModel) {
+		if err := writer.WriteField("output_format", "png"); err != nil {
+			return nil, "", err
+		}
 	}
-	if err := writer.WriteField("size", CreativeOpenAIImageSize(run.ImageSize, run.AspectRatio)); err != nil {
+	if err := writer.WriteField("size", CreativeOpenAIRequestImageSize(upstreamModel, run.ImageSize, run.AspectRatio)); err != nil {
 		return nil, "", err
 	}
 	if err := writer.WriteField("n", "1"); err != nil {
@@ -158,9 +163,40 @@ func BuildCreativeOpenAIRequestBody(run creative.CreativeRun, payload creative.C
 	return buffer.Bytes(), writer.FormDataContentType(), nil
 }
 
-// CreativeOpenAIUsesResponseFormat 仅对 DALL-E 保留旧版 response_format 参数；GPT Image 固定返回 base64。
+// CreativeOpenAIUsesResponseFormat 判断是否需要显式请求 base64 输出：
+// DALL-E 保留旧版 response_format 参数；已登记第三方模型按契约显式索要 b64_json。
 func CreativeOpenAIUsesResponseFormat(model string) bool {
-	return strings.HasPrefix(strings.ToLower(strings.TrimSpace(model)), "dall-e")
+	if strings.HasPrefix(strings.ToLower(strings.TrimSpace(model)), "dall-e") {
+		return true
+	}
+	profile := creative.CreativeOpenAICompatImageProfileFor(model)
+	return profile != nil && profile.RequireResponseFormat
+}
+
+// CreativeOpenAISendsOutputFormat 判断是否发送 GPT Image 专有的 output_format 参数；
+// 第三方兼容模型不发送，避免上游因未知参数报错。
+func CreativeOpenAISendsOutputFormat(model string) bool {
+	return !creative.IsCreativeOpenAICompatImageModel(model)
+}
+
+// CreativeOpenAIRequestImageSize 返回 OpenAI 兼容 images 请求的 size 取值：
+// GPT Image 与像素式第三方模型用 WIDTHxHEIGHT；比例式第三方模型用比例串，
+// 未知比例回退契约第一项（契约无比例时回退 1:1）。
+func CreativeOpenAIRequestImageSize(model, imageSize, aspectRatio string) string {
+	profile := creative.CreativeOpenAICompatImageProfileFor(model)
+	if profile == nil || !profile.SizeAsRatio {
+		return CreativeOpenAIImageSize(imageSize, aspectRatio)
+	}
+	ratio := strings.TrimSpace(aspectRatio)
+	for _, supported := range profile.AspectRatios {
+		if ratio == supported {
+			return ratio
+		}
+	}
+	if len(profile.AspectRatios) > 0 {
+		return profile.AspectRatios[0]
+	}
+	return "1:1"
 }
 
 // ParseCreativeOpenAIImageOutputs 解析 OpenAI images 响应（grok 同结构）的 data[].b64_json。
