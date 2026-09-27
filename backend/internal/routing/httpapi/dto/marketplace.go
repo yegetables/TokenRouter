@@ -35,6 +35,33 @@ type ModelMarketplacePricing struct {
 	ImagePrice1K                  *float64                          `json:"image_price_1k,omitempty"`
 	ImagePrice2K                  *float64                          `json:"image_price_2k,omitempty"`
 	ImagePrice4K                  *float64                          `json:"image_price_4k,omitempty"`
+	TimePricing                   *ModelMarketplaceTimePricing      `json:"time_pricing,omitempty"`
+	PeakRate                      *ModelMarketplacePeakRate         `json:"peak_rate,omitempty"`
+	// ActiveMultiplier 是展示价当前实际计入的总倍率（分时 × 高峰）；未配置分时与高峰时省略。
+	ActiveMultiplier *float64 `json:"active_multiplier,omitempty"`
+}
+
+// ModelMarketplaceTimePricing 是价格配置分时倍率快照；展示价已按 ActiveMultiplier 计入当前时刻。
+type ModelMarketplaceTimePricing struct {
+	Timezone         string                       `json:"timezone"`
+	WeekdaysOnly     bool                         `json:"weekdays_only"`
+	Periods          []ModelMarketplaceTimePeriod `json:"periods"`
+	ActiveMultiplier float64                      `json:"active_multiplier"`
+}
+
+// ModelMarketplaceTimePeriod 是单个分时时段（本地时间，HH:mm 或 HH:mm:ss）。
+type ModelMarketplaceTimePeriod struct {
+	StartTime  string  `json:"start_time"`
+	EndTime    string  `json:"end_time"`
+	Multiplier float64 `json:"multiplier"`
+}
+
+// ModelMarketplacePeakRate 是价格配置高峰窗口快照；token 模式下展示价已计入 Multiplier。
+type ModelMarketplacePeakRate struct {
+	StartTime  string  `json:"start_time"`
+	EndTime    string  `json:"end_time"`
+	Multiplier float64 `json:"multiplier"`
+	Active     bool    `json:"active"`
 }
 
 // ModelMarketplacePricingInterval 是前端模型广场展示用的上下文区间价格。
@@ -209,6 +236,13 @@ func modelMarketplacePricingFromRouting(pricing pricing.ModelDisplayPricing) Mod
 		})
 	}
 
+	// 只在分时或高峰启用时下发总倍率，未配置的模型不新增字段。
+	var activeMultiplier *float64
+	if pricing.TimePricing != nil || pricing.PeakRate != nil {
+		value := pricing.ActiveMultiplier
+		activeMultiplier = &value
+	}
+
 	return ModelMarketplacePricing{
 		PricingMode:                   pricing.PricingMode,
 		PriceStatus:                   pricing.PriceStatus,
@@ -230,6 +264,43 @@ func modelMarketplacePricingFromRouting(pricing pricing.ModelDisplayPricing) Mod
 		ImagePrice1K:                  imagePriceValue(pricing, "1K", pricing.ImagePrice1K),
 		ImagePrice2K:                  imagePriceValue(pricing, "2K", pricing.ImagePrice2K),
 		ImagePrice4K:                  imagePriceValue(pricing, "4K", pricing.ImagePrice4K),
+		TimePricing:                   modelMarketplaceTimePricingFromRouting(pricing.TimePricing),
+		PeakRate:                      modelMarketplacePeakRateFromRouting(pricing.PeakRate),
+		ActiveMultiplier:              activeMultiplier,
+	}
+}
+
+// modelMarketplaceTimePricingFromRouting 把分时倍率快照转换为公开 DTO；未启用时省略字段。
+func modelMarketplaceTimePricingFromRouting(timePricing *pricing.ModelDisplayTimePricing) *ModelMarketplaceTimePricing {
+	if timePricing == nil || len(timePricing.Periods) == 0 {
+		return nil
+	}
+	periods := make([]ModelMarketplaceTimePeriod, 0, len(timePricing.Periods))
+	for _, period := range timePricing.Periods {
+		periods = append(periods, ModelMarketplaceTimePeriod{
+			StartTime:  period.StartTime,
+			EndTime:    period.EndTime,
+			Multiplier: period.Multiplier,
+		})
+	}
+	return &ModelMarketplaceTimePricing{
+		Timezone:         timePricing.Timezone,
+		WeekdaysOnly:     timePricing.WeekdaysOnly,
+		Periods:          periods,
+		ActiveMultiplier: timePricing.ActiveMultiplier,
+	}
+}
+
+// modelMarketplacePeakRateFromRouting 把高峰窗口快照转换为公开 DTO；未启用时省略字段。
+func modelMarketplacePeakRateFromRouting(peakRate *pricing.ModelDisplayPeakRate) *ModelMarketplacePeakRate {
+	if peakRate == nil {
+		return nil
+	}
+	return &ModelMarketplacePeakRate{
+		StartTime:  peakRate.StartTime,
+		EndTime:    peakRate.EndTime,
+		Multiplier: peakRate.Multiplier,
+		Active:     peakRate.Active,
 	}
 }
 

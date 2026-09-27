@@ -645,6 +645,32 @@ export interface MarketplaceModelPricing {
   image_price_1k?: number
   image_price_2k?: number
   image_price_4k?: number
+  time_pricing?: MarketplaceTimePricing
+  peak_rate?: MarketplacePeakRate
+  // 展示价当前实际计入的总倍率（分时 × 高峰）；未配置分时与高峰时省略。
+  active_multiplier?: number
+}
+
+// 价格配置分时倍率：展示价已按 active_multiplier 计入当前时刻，periods 供标注时段。
+export interface MarketplaceTimePeriod {
+  start_time: string
+  end_time: string
+  multiplier: number
+}
+
+export interface MarketplaceTimePricing {
+  timezone: string
+  weekdays_only: boolean
+  periods: MarketplaceTimePeriod[]
+  active_multiplier: number
+}
+
+// 价格配置高峰窗口：token 模式下展示价已计入 multiplier。
+export interface MarketplacePeakRate {
+  start_time: string
+  end_time: string
+  multiplier: number
+  active: boolean
 }
 
 // 模型能力模态：模型广场接口从定价元数据下发，缺省时前端按模型 ID 规则兜底。

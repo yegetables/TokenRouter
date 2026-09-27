@@ -96,6 +96,32 @@ type ModelDisplayPricing struct {
 	ImagePrice1K    float64
 	ImagePrice2K    float64
 	ImagePrice4K    float64
+	// TimePricing 是生效的分时倍率快照；展示价已按 ActiveMultiplier 计入，nil 表示未配置。
+	TimePricing *ModelDisplayTimePricing
+	// PeakRate 是价格配置高峰窗口快照；token 模式下展示价已计入 Multiplier，nil 表示未启用。
+	PeakRate *ModelDisplayPeakRate
+	// ActiveMultiplier 是本时刻实际计入展示价的总倍率（分时倍率 × 高峰因子；图片、按次与视频恒为 1）。
+	// 它与 TimePricing、PeakRate 同源同刻生成，供公开 DTO 直接下发，避免前端再乘一次而与结算口径分叉。
+	ActiveMultiplier float64
+}
+
+// ModelDisplayTimePricing 是模型广场展示用的分时倍率快照。
+type ModelDisplayTimePricing struct {
+	Timezone     string
+	WeekdaysOnly bool
+	// Periods 是价卡配置的原始时段，供前端标注时段。
+	Periods []TimePricingPeriod
+	// ActiveMultiplier 是 at 时刻生效的倍率；1 表示低谷。
+	ActiveMultiplier float64
+}
+
+// ModelDisplayPeakRate 是模型广场展示用的高峰窗口快照。
+type ModelDisplayPeakRate struct {
+	StartTime  string
+	EndTime    string
+	Multiplier float64
+	// Active 表示 at 时刻正处于该高峰窗口。
+	Active bool
 }
 
 // ModelDisplayPricingInterval 是按上下文 token 区间展示的模型价格。
