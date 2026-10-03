@@ -27,7 +27,7 @@ describe('UpstreamUsageConfigEditor', () => {
     })
     expect(wrapper.find('[data-testid="upstream-usage-enabled"]').element).toBeTruthy()
     expect(wrapper.find('[data-testid="upstream-usage-adapter"]').exists()).toBe(true)
-    expect(wrapper.find('[data-testid="upstream-usage-adapter"]').text()).toBe('3')
+    expect(wrapper.find('[data-testid="upstream-usage-adapter"]').text()).toBe('5')
     await wrapper.find('[data-testid="upstream-usage-adapter"]').trigger('click')
     expect(wrapper.emitted('update:adapter')?.[0]).toEqual(['new_api'])
 

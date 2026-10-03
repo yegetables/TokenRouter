@@ -336,7 +336,9 @@ export default {
         adapters: {
           sub2api: 'Sub2API / TokenRouter',
           newApi: 'New API',
-          zivv: 'Zivv'
+          zivv: 'Zivv',
+          zcode: 'ZCode Start Plan',
+          clinePass: 'ClinePass'
         },
         errors: {
           UPSTREAM_USAGE_UNAVAILABLE: '上游用量查询服务不可用',
