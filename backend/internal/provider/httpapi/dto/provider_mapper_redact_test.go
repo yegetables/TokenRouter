@@ -139,6 +139,23 @@ func TestProviderFromServiceShallow_PreservesZivvAdapterSelection(t *testing.T) 
 	}, got.Extra[provider.UpstreamUsageQueryExtraKey])
 }
 
+// 回显按适配器目录校验：目录里新增适配器后这里自动跟随。
+func TestProviderFromServiceShallow_EchoesRegisteredUpstreamUsageAdapters(t *testing.T) {
+	for _, option := range provider.UpstreamUsageAdapterOptions() {
+		src := &provider.Record{
+			Now: time.Now, LoadLocation: time.LoadLocation,
+			ID: 11, Type: capability.ProviderTypeAPIKey,
+			Extra: map[string]any{provider.UpstreamUsageQueryExtraKey: map[string]any{
+				"enabled": true, "adapter": option.Name,
+			}},
+		}
+		got := dto.ProviderFromRecordShallow(src)
+		require.Equal(t, map[string]any{
+			"enabled": true, "adapter": option.Name,
+		}, got.Extra[provider.UpstreamUsageQueryExtraKey], "adapter %s 应原样回显", option.Name)
+	}
+}
+
 func TestProviderFromServiceShallow_NilCredentialsOmitsStatus(t *testing.T) {
 	src := &provider.Record{Now: time.Now, LoadLocation: time.LoadLocation, ID: 1, Name: "n", Platform: "anthropic", Type: "oauth"}
 	got := dto.ProviderFromRecordShallow(src)

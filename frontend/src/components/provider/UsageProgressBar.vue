@@ -9,18 +9,19 @@
 
     <!-- 进度条行 -->
     <div class="flex items-center gap-1">
-      <!-- 标签保持固定宽度，让同一单元格内的多行进度条对齐。 -->
+      <!-- 标签保持固定宽度，让同一单元格内的多行进度条对齐；宽标签放得下模型名，放不下时截断并靠 title 提示全名。 -->
       <span
         :class="[
           props.labelWidth === 'auto'
             ? 'max-w-[72px] truncate text-left'
             : wideLabel
-              ? 'w-[48px] whitespace-nowrap'
+              ? 'w-[96px] truncate'
               : 'w-[32px] whitespace-nowrap',
           'shrink-0 rounded-compact px-1 text-xs font-medium',
           props.labelWidth === 'auto' ? '' : 'text-center',
           labelClass
         ]"
+        :title="label"
       >
         {{ label }}
       </span>

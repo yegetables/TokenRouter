@@ -913,6 +913,7 @@ import GrokBaseUrlPresets from '@/components/provider/GrokBaseUrlPresets.vue'
 import CnBaseUrlPresets from '@/components/provider/CnBaseUrlPresets.vue'
 import OllamaCloudUsageSettings from '@/components/provider/OllamaCloudUsageSettings.vue'
 import UpstreamUsageConfigEditor from '@/components/provider/UpstreamUsageConfigEditor.vue'
+import { isUpstreamUsageAdapter } from '@/utils/upstreamUsage'
 import SettingRow from '@/components/common/settings/SettingRow.vue'
 import SettingsNotice from '@/components/common/settings/SettingsNotice.vue'
 import SettingsSection from '@/components/common/settings/SettingsSection.vue'
@@ -1679,7 +1680,7 @@ const syncFormFromProvider = (newProvider: Provider | null) => {
     const rawUsageConfig = extra?.upstream_usage_query as Record<string, unknown> | undefined
     if (rawUsageConfig && typeof rawUsageConfig === 'object') {
       upstreamUsageEnabled.value = rawUsageConfig.enabled !== false
-      if (rawUsageConfig.adapter === 'new_api' || rawUsageConfig.adapter === 'zivv') {
+      if (isUpstreamUsageAdapter(rawUsageConfig.adapter)) {
         upstreamUsageAdapter.value = rawUsageConfig.adapter
       }
       if (typeof rawUsageConfig.base_url === 'string') upstreamUsageBaseUrl.value = rawUsageConfig.base_url

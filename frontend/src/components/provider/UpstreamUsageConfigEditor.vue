@@ -65,12 +65,12 @@ import Collapse from '@/components/common/Collapse.vue'
 import SettingsSection from '@/components/common/settings/SettingsSection.vue'
 import SettingsSubpanel from '@/components/common/settings/SettingsSubpanel.vue'
 import SettingToggleRow from '@/components/common/settings/SettingToggleRow.vue'
+import { isUpstreamUsageAdapter } from '@/utils/upstreamUsage'
 
 import { computed, useId } from 'vue'
 import { useI18n } from 'vue-i18n'
 import Select, { type SelectOption } from '@/components/common/Select.vue'
 import type { UpstreamUsageAdapter } from '@/types'
-
 const props = withDefaults(defineProps<{
   enabled: boolean
   adapter: UpstreamUsageAdapter
@@ -115,7 +115,11 @@ const enabledModel = computed({
 const adapterModel = computed({
   get: () => props.adapter,
   set: (value: string | number | boolean | null) => {
-    if (value === 'sub2api' || value === 'new_api' || value === 'zivv' || value === 'zcode' || value === 'cline_pass') emit('update:adapter', value)
+    // 先收窄成适配器名，再走 emit 的字符串重载，避免联合类型干扰重载解析。
+    if (isUpstreamUsageAdapter(value)) {
+      const adapter: UpstreamUsageAdapter = value
+      emit('update:adapter', adapter)
+    }
   }
 })
 

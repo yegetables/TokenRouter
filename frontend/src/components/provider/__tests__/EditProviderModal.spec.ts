@@ -400,6 +400,17 @@ describe('EditProviderModal', () => {
     })
   })
 
+  it('loads every registered upstream usage adapter saved on the provider', () => {
+    for (const adapter of ['zcode', 'cline_pass'] as const) {
+      const provider = buildProvider()
+      provider.extra = { upstream_usage_query: { enabled: true, adapter } }
+      const wrapper = mountModal(provider)
+
+      const select = wrapper.get<HTMLSelectElement>('[data-testid="upstream-usage-adapter"]')
+      expect(select.element.value).toBe(adapter)
+    }
+  })
+
   it('reopening the same provider rehydrates the OpenAI whitelist from props', async () => {
     const provider = buildProvider()
     updateProviderMock.mockResolvedValue(provider)
