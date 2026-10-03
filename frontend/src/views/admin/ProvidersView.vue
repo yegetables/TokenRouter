@@ -817,7 +817,7 @@ const effectiveUpstreamUsageAdapter = (provider: Provider) => {
   if (provider.platform === 'deepseek') return 'deepseek_balance'
   const rawConfig = provider.extra?.upstream_usage_query as Record<string, unknown> | undefined
   return rawConfig?.adapter === 'new_api' || rawConfig?.adapter === 'zivv' ||
-    rawConfig?.adapter === 'zcode'
+    rawConfig?.adapter === 'zcode' || rawConfig?.adapter === 'cline_pass'
     ? rawConfig.adapter
     : 'sub2api'
 }

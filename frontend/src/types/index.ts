@@ -1553,6 +1553,7 @@ export type UpstreamUsageAdapter =
   | 'zhipu_coding'
   | 'deepseek_balance'
   | 'zcode'
+  | 'cline_pass'
 
 export interface UpstreamUsageQueryConfig {
   enabled: boolean

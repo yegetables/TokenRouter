@@ -105,7 +105,7 @@ internal/routing internal/routing/accessview internal/routing/capability
 internal/routing/httpapi/dto internal/routing/modelmap internal/scheduler internal/scheduler/policy
 internal/server/httpx internal/settings internal/upstream internal/upstream/anthropic
 internal/upstream/anthropic/oauth internal/upstream/antigravity internal/upstream/bedrock
-internal/upstream/deepseek internal/upstream/gemini internal/upstream/gemini/codeassist
+internal/upstream/clinepass internal/upstream/deepseek internal/upstream/gemini internal/upstream/gemini/codeassist
 internal/upstream/grok internal/upstream/kimi internal/upstream/ollama internal/upstream/openai
 internal/upstream/qoder internal/upstream/usagecontract internal/upstream/usageprovider
 internal/upstream/usageview internal/upstream/vertex internal/upstream/zcode internal/upstream/zhipu internal/usage`, Tests: `internal/config internal/gateway internal/gateway/forward internal/gateway/media
@@ -337,6 +337,8 @@ internal/protocol/google internal/protocol/openai internal/upstream
 internal/upstream/antigravity/...`, Tests: ""},
 	"internal/upstream/bedrock": {Production: `internal/infra/telemetry/... internal/protocol internal/protocol/anthropic internal/upstream
 internal/upstream/bedrock/...`, Tests: ""},
+	"internal/upstream/clinepass": {Production: `internal/upstream/clinepass/... internal/upstream/internal/usageclient
+internal/upstream/usagecontract internal/upstream/usageview`, Tests: ""},
 	"internal/upstream/deepseek": {Production: `internal/upstream/deepseek/... internal/upstream/internal/usageclient
 internal/upstream/usagecontract internal/upstream/usageview`, Tests: ""},
 	"internal/upstream/gemini": {Production: `internal/infra/httpclient/... internal/infra/telemetry/... internal/pkg/ internal/protocol

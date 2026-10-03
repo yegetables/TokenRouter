@@ -9,4 +9,5 @@ const (
 	UpstreamUsageAdapterKimiBalance     = "kimi_balance"
 	UpstreamUsageAdapterDeepseekBalance = "deepseek_balance"
 	UpstreamUsageAdapterZCode           = "zcode"
+	UpstreamUsageAdapterClinePass       = "cline_pass"
 )

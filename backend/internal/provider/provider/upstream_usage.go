@@ -6,6 +6,7 @@ import (
 	"sync"
 
 	"github.com/TokenFlux/TokenRouter/internal/provider"
+	"github.com/TokenFlux/TokenRouter/internal/upstream/clinepass"
 	"github.com/TokenFlux/TokenRouter/internal/upstream/deepseek"
 	"github.com/TokenFlux/TokenRouter/internal/upstream/kimi"
 	"github.com/TokenFlux/TokenRouter/internal/upstream/usagecontract"
@@ -40,6 +41,7 @@ func NewUpstreamUsageExecution(options UpstreamUsageExecutionOptions) *UpstreamU
 		provider.UpstreamUsageAdapterZhipuCoding:     func() usagecontract.Adapter { return &zhipu.ZhipuCodingUsageAdapter{} },
 		provider.UpstreamUsageAdapterDeepseekBalance: func() usagecontract.Adapter { return &deepseek.DeepseekBalanceUsageAdapter{} },
 		provider.UpstreamUsageAdapterZCode:           func() usagecontract.Adapter { return &zcode.ZCodeUsageAdapter{} },
+		provider.UpstreamUsageAdapterClinePass:       func() usagecontract.Adapter { return &clinepass.ClinePassUsageAdapter{} },
 	}
 	for _, spec := range provider.UpstreamUsageAdapterCatalog() {
 		source.RegisterAdapter(factories[spec.Name]())

@@ -52,5 +52,6 @@ func TestEffectiveUpstreamUsageConfigDefaultsAndNormalization(t *testing.T) {
 		{Name: providercore.UpstreamUsageAdapterNewAPI, Label: "New API"},
 		{Name: providercore.UpstreamUsageAdapterZivv, Label: "Zivv"},
 		{Name: providercore.UpstreamUsageAdapterZCode, Label: "ZCode Start Plan"},
+		{Name: providercore.UpstreamUsageAdapterClinePass, Label: "ClinePass"},
 	}, providercore.UpstreamUsageAdapterOptions())
 }
