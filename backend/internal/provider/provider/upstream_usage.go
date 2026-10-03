@@ -10,6 +10,7 @@ import (
 	"github.com/TokenFlux/TokenRouter/internal/upstream/kimi"
 	"github.com/TokenFlux/TokenRouter/internal/upstream/usagecontract"
 	"github.com/TokenFlux/TokenRouter/internal/upstream/usageprovider"
+	"github.com/TokenFlux/TokenRouter/internal/upstream/zcode"
 	"github.com/TokenFlux/TokenRouter/internal/upstream/zhipu"
 )
 
@@ -38,6 +39,7 @@ func NewUpstreamUsageExecution(options UpstreamUsageExecutionOptions) *UpstreamU
 		provider.UpstreamUsageAdapterKimiBalance:     func() usagecontract.Adapter { return &kimi.KimiBalanceUsageAdapter{} },
 		provider.UpstreamUsageAdapterZhipuCoding:     func() usagecontract.Adapter { return &zhipu.ZhipuCodingUsageAdapter{} },
 		provider.UpstreamUsageAdapterDeepseekBalance: func() usagecontract.Adapter { return &deepseek.DeepseekBalanceUsageAdapter{} },
+		provider.UpstreamUsageAdapterZCode:           func() usagecontract.Adapter { return &zcode.ZCodeUsageAdapter{} },
 	}
 	for _, spec := range provider.UpstreamUsageAdapterCatalog() {
 		source.RegisterAdapter(factories[spec.Name]())

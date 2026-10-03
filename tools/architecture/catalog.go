@@ -108,7 +108,7 @@ internal/upstream/anthropic/oauth internal/upstream/antigravity internal/upstrea
 internal/upstream/deepseek internal/upstream/gemini internal/upstream/gemini/codeassist
 internal/upstream/grok internal/upstream/kimi internal/upstream/ollama internal/upstream/openai
 internal/upstream/qoder internal/upstream/usagecontract internal/upstream/usageprovider
-internal/upstream/usageview internal/upstream/vertex internal/upstream/zhipu internal/usage`, Tests: `internal/config internal/gateway internal/gateway/forward internal/gateway/media
+internal/upstream/usageview internal/upstream/vertex internal/upstream/zcode internal/upstream/zhipu internal/usage`, Tests: `internal/config internal/gateway internal/gateway/forward internal/gateway/media
 internal/gateway/provider/modelidentity internal/gateway/requeststate internal/gateway/session
 internal/idempotency/testkit internal/identity/httpapi/authctx internal/infra/timingwheel/...
 internal/ops internal/routing/provider internal/testutil/assertion internal/testutil/rediscontainer`},
@@ -359,6 +359,8 @@ internal/upstream/qoder/...`, Tests: ""},
 internal/upstream/usageprovider/... internal/upstream/usageview`, Tests: "internal/infra/httpclient/..."},
 	"internal/upstream/vertex": {Production: `internal/infra/httpclient/... internal/protocol/anthropic internal/protocol/google
 internal/upstream/internal/googleauth internal/upstream/vertex/...`, Tests: "internal/infra/telemetry/..."},
+	"internal/upstream/zcode": {Production: `internal/upstream/internal/usageclient internal/upstream/usagecontract internal/upstream/usageview
+internal/upstream/zcode/...`, Tests: ""},
 	"internal/upstream/zhipu": {Production: `internal/upstream/internal/usageclient internal/upstream/usagecontract internal/upstream/usageview
 internal/upstream/zhipu/...`, Tests: ""},
 }

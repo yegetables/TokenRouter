@@ -10,6 +10,7 @@ const (
 	UpstreamUsageAdapterZhipuCoding     = usageview.UpstreamUsageAdapterZhipuCoding
 	UpstreamUsageAdapterKimiBalance     = usageview.UpstreamUsageAdapterKimiBalance
 	UpstreamUsageAdapterDeepseekBalance = usageview.UpstreamUsageAdapterDeepseekBalance
+	UpstreamUsageAdapterZCode           = usageview.UpstreamUsageAdapterZCode
 	NewAPIUserAccessTokenCredentialKey  = "new_api_user_access_token"
 	NewAPIUserIDCredentialKey           = "new_api_user_id"
 	UpstreamUsageDefaultAdapter         = UpstreamUsageAdapterSub2API
@@ -29,6 +30,7 @@ var usageAdapterCatalog = []UsageAdapterSpec{
 	{Name: UpstreamUsageAdapterZhipuCoding, Label: "Zhipu Coding Plan", Automatic: true},
 	{Name: UpstreamUsageAdapterKimiBalance, Label: "Kimi Balance", Automatic: true},
 	{Name: UpstreamUsageAdapterDeepseekBalance, Label: "DeepSeek Balance", Automatic: true},
+	{Name: UpstreamUsageAdapterZCode, Label: "ZCode Start Plan", Automatic: false},
 }
 
 // UpstreamUsageAdapterCatalog 返回独立列表，调用方不能改变配置校验目录。

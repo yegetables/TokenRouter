@@ -102,7 +102,8 @@ const uid = useId()
 const adapterOptions = computed<SelectOption[]>(() => [
   { value: 'sub2api', label: t('admin.providers.upstreamUsage.adapters.sub2api') },
   { value: 'new_api', label: t('admin.providers.upstreamUsage.adapters.newApi') },
-  { value: 'zivv', label: t('admin.providers.upstreamUsage.adapters.zivv') }
+  { value: 'zivv', label: t('admin.providers.upstreamUsage.adapters.zivv') },
+  { value: 'zcode', label: t('admin.providers.upstreamUsage.adapters.zcode') }
 ])
 
 const enabledModel = computed({
@@ -113,7 +114,7 @@ const enabledModel = computed({
 const adapterModel = computed({
   get: () => props.adapter,
   set: (value: string | number | boolean | null) => {
-    if (value === 'sub2api' || value === 'new_api' || value === 'zivv') emit('update:adapter', value)
+    if (value === 'sub2api' || value === 'new_api' || value === 'zivv' || value === 'zcode') emit('update:adapter', value)
   }
 })
 

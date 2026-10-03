@@ -440,7 +440,8 @@ export default {
         adapters: {
           sub2api: 'Sub2API / TokenRouter',
           newApi: 'New API',
-          zivv: 'Zivv'
+          zivv: 'Zivv',
+          zcode: 'ZCode Start Plan'
         },
         errors: {
           UPSTREAM_USAGE_UNAVAILABLE: 'Upstream usage query service is unavailable',
