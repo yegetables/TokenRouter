@@ -61,7 +61,9 @@ ENV GOPROXY=${GOPROXY}
 ENV GOSUMDB=${GOSUMDB}
 
 # Install build dependencies
-RUN apk add --no-cache git ca-certificates tzdata
+# dl-cdn.alpinelinux.org 在部分网络下 TLS 握手失败，换清华镜像源。
+RUN sed -i 's#https://dl-cdn.alpinelinux.org#https://mirrors.tuna.tsinghua.edu.cn#g' /etc/apk/repositories \
+    && apk add --no-cache git ca-certificates tzdata
 
 WORKDIR /app/backend
 
@@ -107,7 +109,9 @@ LABEL description="TokenRouter - AI API Gateway Platform"
 LABEL org.opencontainers.image.source="https://github.com/TokenFlux/TokenRouter"
 
 # Install runtime dependencies
-RUN apk add --no-cache \
+# 同样替换为清华镜像源，避免 dl-cdn 的 TLS 握手失败。
+RUN sed -i 's#https://dl-cdn.alpinelinux.org#https://mirrors.tuna.tsinghua.edu.cn#g' /etc/apk/repositories \
+    && apk add --no-cache \
     ca-certificates \
     tzdata \
     su-exec \
