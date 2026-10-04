@@ -42,15 +42,15 @@ var headerRedactedKeys = map[string]struct{}{
 
 // Entry 是一次请求的载荷快照。
 type Entry struct {
-	ClientRequestID       string
-	RequestHeadersJSON    string
-	ResponseHeadersJSON   string
-	RequestBody           string
-	ResponseBody          string
-	RequestBodyTruncated  bool
-	ResponseBodyTruncated bool
-	StatusCode            int
-	RequestPath           string
+	ClientRequestID       string `json:"client_request_id"`
+	RequestHeadersJSON    string `json:"request_headers"`
+	ResponseHeadersJSON   string `json:"response_headers"`
+	RequestBody           string `json:"request_body"`
+	ResponseBody          string `json:"response_body"`
+	RequestBodyTruncated  bool   `json:"request_body_truncated"`
+	ResponseBodyTruncated bool   `json:"response_body_truncated"`
+	StatusCode            int    `json:"status_code"`
+	RequestPath           string `json:"request_path"`
 }
 
 // Store 把快照写入 self_request_payloads 表。

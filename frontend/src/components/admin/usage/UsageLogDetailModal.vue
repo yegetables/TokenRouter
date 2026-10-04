@@ -103,7 +103,7 @@
           </div>
         </div>
       </section>
-      <p v-else-if="payloadAvailable" class="text-xs text-gray-400 dark:text-gray-500">{{ t('usage.detail.payloadEmpty') }}</p>
+      <p v-else-if="payload" class="text-xs text-gray-400 dark:text-gray-500">{{ t('usage.detail.payloadEmpty') }}</p>
       <p v-else class="text-xs text-gray-400 dark:text-gray-500">{{ t('usage.detail.payloadUnavailable') }}</p>
     </div>
   </BaseDialog>
@@ -133,8 +133,6 @@ const { formatBalanceAmount, formatUsdAmount } = useBalanceDisplay()
 
 const loading = ref(false)
 const payload = ref<SelfRequestPayload | null>(null)
-
-const payloadAvailable = computed(() => !!props.row?.request_id)
 
 // 用量行 request_id 形如 "client:<id>"，剥离前缀即捕获表关联键。
 const clientRequestID = computed(() => {

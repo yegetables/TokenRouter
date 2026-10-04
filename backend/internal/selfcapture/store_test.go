@@ -1,9 +1,27 @@
 package selfcapture
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 )
+
+// 前端按 snake_case 读取载荷字段；结构体漏掉 JSON tag 会让弹窗永远显示“未捕获”。
+func TestEntryJSONFieldNames(t *testing.T) {
+	raw, err := json.Marshal(Entry{ClientRequestID: "x", RequestBody: "{}", ResponseBody: "{}"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, key := range []string{
+		"client_request_id", "request_headers", "response_headers",
+		"request_body", "response_body", "request_body_truncated",
+		"response_body_truncated", "status_code", "request_path",
+	} {
+		if !strings.Contains(string(raw), `"`+key+`"`) {
+			t.Fatalf("返回 JSON 缺少字段 %q: %s", key, raw)
+		}
+	}
+}
 
 func TestCaptureHeadersRedactsSensitiveKeys(t *testing.T) {
 	headers := CaptureRequestHeaders(map[string][]string{
