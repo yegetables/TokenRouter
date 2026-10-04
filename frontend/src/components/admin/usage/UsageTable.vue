@@ -344,12 +344,12 @@
           <button
             type="button"
             class="rounded-compact p-1 text-gray-400 transition-colors hover:bg-gray-100 hover:text-primary-600 dark:hover:bg-dark-700 dark:hover:text-primary-400"
-            :title="t('usage.detail.open')"
-            :aria-label="t('usage.detail.open')"
+            :title="t('admin.ops.errorLog.details')"
+            :aria-label="t('admin.ops.errorLog.details')"
             data-test="usage-detail-button"
             @click.stop="$emit('detail', row)"
           >
-            <Icon name="search" size="sm" class="h-3.5 w-3.5" />
+            <Icon name="document" size="sm" class="h-4 w-4" />
           </button>
         </template>
 

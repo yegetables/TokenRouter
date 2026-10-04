@@ -550,6 +550,16 @@ describe('admin UsageView request ID column visibility', () => {
     )
   })
 
+  it('always exposes the usage detail action column', async () => {
+    const wrapper = mountColumnView()
+    await wrapper.vm.$nextTick()
+
+    // 详情按钮挂在 actions 列上；该列缺失时表格不会渲染按钮（回归：曾漏传）。
+    expect(wrapper.findComponent(UsageTableStub).props('columns')).toEqual(
+      expect.arrayContaining([expect.objectContaining({ key: 'actions' })]),
+    )
+  })
+
   it('keeps upstream ID hidden by default and allows enabling it from column settings', async () => {
     const wrapper = mount(UsageView, {
       global: {
