@@ -108,6 +108,6 @@ jobs:
             echo "开发实例更新："
             echo
             echo '```bash'
-            echo "cd ~/work/token-router-dev && docker compose up -d --pull always"
+            echo "cd ~/compose-all/1panel-compose/ai && docker compose up -d --pull always"
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
