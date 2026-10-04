@@ -70,7 +70,7 @@ describe('KeyActionMenu', () => {
     }
   })
 
-  it('将使用、tf/CCS 导入、轮换和删除收纳到更多菜单', async () => {
+  it('将使用、tf/CCS 导入、复制配置、轮换和删除收纳到更多菜单', async () => {
     const wrapper = mount(KeyActionMenu, {
       props: {
         show: true,
@@ -83,10 +83,11 @@ describe('KeyActionMenu', () => {
 
     const menu = document.body.querySelector('[role="menu"]')
     expect(menu?.id).toBe('key-action-menu-7')
-    expect(menu?.querySelectorAll('[role="menuitem"]')).toHaveLength(5)
+    expect(menu?.querySelectorAll('[role="menuitem"]')).toHaveLength(6)
     expect(document.body.textContent).toContain('keys.useKey')
     expect(document.body.textContent).toContain('keys.importToTf')
     expect(document.body.textContent).toContain('keys.importToCcSwitch')
+    expect(document.body.textContent).toContain('keys.duplicateKey')
     expect(document.body.textContent).toContain('common.delete')
     expect(document.body.textContent).toContain('keys.rotateKey')
 
@@ -113,12 +114,21 @@ describe('KeyActionMenu', () => {
     expect(wrapper.emitted('delete')?.[0]).toEqual([apiKey])
     expect(wrapper.emitted('close')).toHaveLength(2)
 
+    await wrapper.setProps({ show: true })
+    const duplicateButton = Array.from(document.body.querySelectorAll('button'))
+      .find((button) => button.textContent?.includes('keys.duplicateKey'))
+    duplicateButton?.click()
+    await wrapper.vm.$nextTick()
+    expect(wrapper.emitted('duplicate')?.[0]).toEqual([apiKey])
+    expect(wrapper.emitted('close')).toHaveLength(3)
+
+    await wrapper.setProps({ show: true })
     const rotateButton = Array.from(document.body.querySelectorAll('button'))
       .find((button) => button.textContent?.includes('keys.rotateKey'))
     rotateButton?.click()
     await wrapper.vm.$nextTick()
     expect(wrapper.emitted('rotate')?.[0]).toEqual([apiKey])
-    expect(wrapper.emitted('close')).toHaveLength(3)
+    expect(wrapper.emitted('close')).toHaveLength(4)
     wrapper.unmount()
   })
 

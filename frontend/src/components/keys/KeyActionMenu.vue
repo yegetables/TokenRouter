@@ -26,6 +26,10 @@
               {{ t('keys.importToCcSwitch') }}
             </button>
             <div class="my-1 border-t border-gray-100 dark:border-dark-700"></div>
+            <button type="button" class="dropdown-item" role="menuitem" @click="emitAction('duplicate')">
+              <Icon name="copy" size="sm" class="text-gray-500 dark:text-gray-400" :stroke-width="2" />
+              {{ t('keys.duplicateKey') }}
+            </button>
             <button type="button" class="dropdown-item" role="menuitem" @click="emitAction('rotate')">
               <Icon name="refresh" size="sm" class="text-primary-500" :stroke-width="2" />
               {{ t('keys.rotateKey') }}
@@ -59,6 +63,7 @@ const emit = defineEmits<{
   (event: 'use', apiKey: ApiKey): void
   (event: 'import-tf', apiKey: ApiKey): void
   (event: 'import', apiKey: ApiKey): void
+  (event: 'duplicate', apiKey: ApiKey): void
   (event: 'rotate', apiKey: ApiKey): void
   (event: 'delete', apiKey: ApiKey): void
 }>()
@@ -66,11 +71,12 @@ const emit = defineEmits<{
 const { t } = useI18n()
 
 // 菜单动作先传递当前 Key，再关闭浮层，确保后续弹窗不被透明遮罩拦截。
-const emitAction = (event: 'use' | 'import-tf' | 'import' | 'rotate' | 'delete') => {
+const emitAction = (event: 'use' | 'import-tf' | 'import' | 'duplicate' | 'rotate' | 'delete') => {
   if (!props.apiKey) return
   if (event === 'use') emit('use', props.apiKey)
   else if (event === 'import-tf') emit('import-tf', props.apiKey)
   else if (event === 'import') emit('import', props.apiKey)
+  else if (event === 'duplicate') emit('duplicate', props.apiKey)
   else if (event === 'rotate') emit('rotate', props.apiKey)
   else emit('delete', props.apiKey)
   emit('close')
