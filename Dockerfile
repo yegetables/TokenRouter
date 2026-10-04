@@ -76,6 +76,9 @@ RUN --mount=type=cache,id=tokenrouter-gomod,target=/go/pkg/mod \
 # 先复制后端源码
 COPY backend/ ./
 
+# 克隆到 fnOS 等卷时脚本权限位可能为 0000，显式恢复后再进入版本解析步骤。
+RUN chmod 755 ./scripts/*.sh
+
 # 再复制前端构建产物，避免被后端源码覆盖
 COPY --from=frontend-builder /app/backend/internal/web/dist ./internal/web/dist
 
@@ -144,7 +147,9 @@ RUN mkdir -p /app/data && chown tokenrouter:tokenrouter /app/data
 
 # Copy entrypoint script (fixes volume permissions then drops to tokenrouter)
 COPY deploy/docker-entrypoint.sh /app/docker-entrypoint.sh
-RUN chmod +x /app/docker-entrypoint.sh
+# 显式设置 755：某些文件系统（如 fnOS 卷）克隆出的文件权限位为 0000，
+# 只用 chmod +x 会得到 0111，容器内解释器读不到脚本导致 Permission denied。
+RUN chmod 755 /app/docker-entrypoint.sh
 
 # Expose port (can be overridden by SERVER_PORT env var)
 EXPOSE 8080
