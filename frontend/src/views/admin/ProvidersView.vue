@@ -521,7 +521,7 @@ import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/app'
 import { useAuthStore } from '@/stores/auth'
 import { adminAPI } from '@/api/admin'
-import { isUpstreamUsageQueryEnabled, supportsUpstreamUsageQuery } from '@/utils/upstreamUsage'
+import { isUpstreamUsageAdapter, isUpstreamUsageQueryEnabled, supportsUpstreamUsageQuery } from '@/utils/upstreamUsage'
 import { useTableLoader } from '@/composables/useTableLoader'
 import { useSwipeSelect, type SwipeSelectVirtualContext } from '@/composables/useSwipeSelect'
 import { useTableSelection } from '@/composables/useTableSelection'
@@ -816,9 +816,8 @@ const effectiveUpstreamUsageAdapter = (provider: Provider) => {
   }
   if (provider.platform === 'deepseek') return 'deepseek_balance'
   const rawConfig = provider.extra?.upstream_usage_query as Record<string, unknown> | undefined
-  return rawConfig?.adapter === 'new_api' || rawConfig?.adapter === 'zivv'
-    ? rawConfig.adapter
-    : 'sub2api'
+  const savedAdapter = rawConfig?.adapter
+  return isUpstreamUsageAdapter(savedAdapter) ? savedAdapter : 'sub2api'
 }
 
 // 缓存键需要区分不同 Base URL，但不应把可能包含内部路径信息的原文写进浏览器存储。

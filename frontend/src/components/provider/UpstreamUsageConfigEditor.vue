@@ -17,6 +17,18 @@
             :options="adapterOptions"
             data-testid="upstream-usage-adapter"
           />
+          <p v-if="adapterModel === 'zcode'" class="input-hint">
+            <i18n-t keypath="admin.providers.upstreamUsage.zcodeNotice" tag="span" scope="global">
+              <template #link>
+                <a
+                  href="https://github.com/TriDefender/zcode-api"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  class="text-primary-600 hover:underline dark:text-primary-400"
+                >zcode-api</a>
+              </template>
+            </i18n-t>
+          </p>
         </div>
         <div>
           <label class="input-label">{{ t('admin.providers.upstreamUsage.baseUrl') }}</label>
@@ -65,12 +77,12 @@ import Collapse from '@/components/common/Collapse.vue'
 import SettingsSection from '@/components/common/settings/SettingsSection.vue'
 import SettingsSubpanel from '@/components/common/settings/SettingsSubpanel.vue'
 import SettingToggleRow from '@/components/common/settings/SettingToggleRow.vue'
+import { isUpstreamUsageAdapter } from '@/utils/upstreamUsage'
 
 import { computed, useId } from 'vue'
 import { useI18n } from 'vue-i18n'
 import Select, { type SelectOption } from '@/components/common/Select.vue'
 import type { UpstreamUsageAdapter } from '@/types'
-
 const props = withDefaults(defineProps<{
   enabled: boolean
   adapter: UpstreamUsageAdapter
@@ -102,7 +114,10 @@ const uid = useId()
 const adapterOptions = computed<SelectOption[]>(() => [
   { value: 'sub2api', label: t('admin.providers.upstreamUsage.adapters.sub2api') },
   { value: 'new_api', label: t('admin.providers.upstreamUsage.adapters.newApi') },
-  { value: 'zivv', label: t('admin.providers.upstreamUsage.adapters.zivv') }
+  { value: 'zivv', label: t('admin.providers.upstreamUsage.adapters.zivv') },
+  { value: 'zcode', label: t('admin.providers.upstreamUsage.adapters.zcode') },
+  { value: 'cline', label: t('admin.providers.upstreamUsage.adapters.cline') },
+  { value: 'cline_pass', label: t('admin.providers.upstreamUsage.adapters.clinePass') }
 ])
 
 const enabledModel = computed({
@@ -113,7 +128,11 @@ const enabledModel = computed({
 const adapterModel = computed({
   get: () => props.adapter,
   set: (value: string | number | boolean | null) => {
-    if (value === 'sub2api' || value === 'new_api' || value === 'zivv') emit('update:adapter', value)
+    // 先收窄成适配器名，再走 emit 的字符串重载，避免联合类型干扰重载解析。
+    if (isUpstreamUsageAdapter(value)) {
+      const adapter: UpstreamUsageAdapter = value
+      emit('update:adapter', adapter)
+    }
   }
 })
 

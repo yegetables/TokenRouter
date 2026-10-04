@@ -1552,6 +1552,9 @@ export type UpstreamUsageAdapter =
   | 'kimi_coding'
   | 'zhipu_coding'
   | 'deepseek_balance'
+  | 'zcode'
+  | 'cline'
+  | 'cline_pass'
 
 export interface UpstreamUsageQueryConfig {
   enabled: boolean

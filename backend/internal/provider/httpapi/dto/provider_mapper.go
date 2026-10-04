@@ -240,8 +240,8 @@ func redactUpstreamUsageQuery(value any) map[string]any {
 		result["enabled"] = enabled
 	}
 	if adapter, ok := object["adapter"].(string); ok {
-		// 只回显已注册协议名，历史记录中的任意字符串可能包含误写入的凭据。
-		if adapter == provider.UpstreamUsageAdapterSub2API || adapter == provider.UpstreamUsageAdapterNewAPI || adapter == provider.UpstreamUsageAdapterZivv {
+		// 只回显已注册适配器名，历史记录中的任意字符串可能包含误写入的凭据。
+		if provider.IsKnownUpstreamUsageAdapter(adapter) {
 			result["adapter"] = adapter
 		}
 	}

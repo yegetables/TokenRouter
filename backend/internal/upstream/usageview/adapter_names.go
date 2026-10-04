@@ -8,4 +8,7 @@ const (
 	UpstreamUsageAdapterZhipuCoding     = "zhipu_coding"
 	UpstreamUsageAdapterKimiBalance     = "kimi_balance"
 	UpstreamUsageAdapterDeepseekBalance = "deepseek_balance"
+	UpstreamUsageAdapterZCode           = "zcode"
+	UpstreamUsageAdapterCline           = "cline"
+	UpstreamUsageAdapterClinePass       = "cline_pass"
 )
