@@ -158,8 +158,8 @@ describe('UsageProgressBar', () => {
     })
 
     const label = wrapper.get('span')
-    expect(label.classes()).toContain('w-[48px]')
-    expect(label.classes()).toContain('whitespace-nowrap')
+    expect(label.classes()).toContain('w-[96px]')
+    expect(label.classes()).toContain('truncate')
     expect(label.classes()).not.toContain('w-[32px]')
   })
 
@@ -218,5 +218,16 @@ describe('UsageProgressBar', () => {
     const percent = wrapper.get('.h-1\\.5 + span')
     expect(percent.classes()).toContain('w-[32px]')
     expect(percent.classes()).toContain('text-right')
+  })
+
+  it('wideLabel 定宽加宽并截断，长模型名靠 title 展示全名', () => {
+    const wrapper = mount(UsageProgressBar, {
+      props: { label: 'GLM-5.3-Flash', utilization: 100, color: 'indigo', wideLabel: true }
+    })
+
+    const label = wrapper.get('.gap-1 > span')
+    expect(label.classes()).toContain('w-[96px]')
+    expect(label.classes()).toContain('truncate')
+    expect(label.attributes('title')).toBe('GLM-5.3-Flash')
   })
 })
