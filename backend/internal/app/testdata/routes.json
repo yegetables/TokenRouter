@@ -186,6 +186,7 @@
   "GET /api/v1/admin/risk-control/media/:id/content",
   "GET /api/v1/admin/risk-control/status",
   "GET /api/v1/admin/scheduled-test-plans/:id/results",
+  "GET /api/v1/admin/self/request-payloads/:client_request_id",
   "GET /api/v1/admin/settings",
   "GET /api/v1/admin/settings/admin-api-key",
   "GET /api/v1/admin/settings/beta-policy",

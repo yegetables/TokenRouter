@@ -549,6 +549,18 @@ export default {
       detailCoordinates: 'Coordinates',
     },
     tabs: { usage: 'Usage', errors: 'Error Requests', ranking: 'User Ranking' },
+    detail: {
+      title: 'Request Detail',
+      open: 'View detail',
+      payloadTitle: 'Request/Response Snapshot',
+      requestHeaders: 'Request Headers',
+      requestBody: 'Request Body',
+      responseHeaders: 'Response Headers',
+      responseBody: 'Response Body',
+      truncated: 'Content truncated',
+      payloadEmpty: 'No payload captured for this request.',
+      payloadUnavailable: 'Payload snapshot unavailable (capture disabled or data expired).',
+    },
     errors: {
       time: 'Time', model: 'Model', endpoint: 'Endpoint', status: 'Status',
       category: 'Category', platform: 'Platform', message: 'Message',

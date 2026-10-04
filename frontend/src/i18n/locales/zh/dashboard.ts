@@ -554,6 +554,18 @@ export default {
       detailCoordinates: '坐标',
     },
     tabs: { usage: '用量明细', errors: '错误请求', ranking: '用户排行' },
+    detail: {
+      title: '请求详情',
+      open: '查看详情',
+      payloadTitle: '请求/响应快照',
+      requestHeaders: '请求头',
+      requestBody: '请求体',
+      responseHeaders: '响应头',
+      responseBody: '响应体',
+      truncated: '内容过长已截断',
+      payloadEmpty: '本次请求未捕获到载荷内容。',
+      payloadUnavailable: '载荷快照不可用（未开启捕获或数据已过期）。',
+    },
     errors: {
       time: '时间', model: '模型', endpoint: '端点', status: '状态码',
       category: '分类', platform: '平台', message: '错误信息',

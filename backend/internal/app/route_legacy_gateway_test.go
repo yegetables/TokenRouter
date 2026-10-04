@@ -33,7 +33,7 @@ func legacyRouteMiddleware(auth keyhttp.APIKeyAuthMiddleware, keys *apikey.APIKe
 	if keys != nil {
 		native = keys
 	}
-	value := provideGatewayRouteMiddleware(auth, native, subscriptions, ops, cfg, nil, nil)
+	value := provideGatewayRouteMiddleware(auth, native, subscriptions, ops, cfg, nil, nil, nil)
 	options := gatewayhttp.GroupAssignmentOptions{Access: func(c *gin.Context) gatewayhttp.GroupAssignmentAccess {
 		key, ok := keyhttp.GetAPIKeyFromContext(c)
 		if !ok || key == nil {

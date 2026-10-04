@@ -36,6 +36,7 @@ func initializeApplication(ctx context.Context, cfg *config.Config, info BuildIn
 		billingAssemblyProviders,
 		usageAssemblyProviders,
 		auditAssemblyProviders,
+		selfCaptureProviders,
 		schedulerAssemblyProviders,
 		upstreamAssemblyProviders,
 		httpAssemblyProviders,

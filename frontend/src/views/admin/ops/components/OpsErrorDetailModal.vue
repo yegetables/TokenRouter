@@ -137,6 +137,20 @@
         </div>
       </div>
 
+      <!-- fork 专属：请求/响应快照（self_request_payloads），按内部关联 ID 拉取。 -->
+      <div v-if="selfPayloadSections.length" class="rounded-surface bg-gray-50 p-6 dark:bg-dark-950">
+        <h3 class="text-sm font-black uppercase tracking-wider text-gray-900 dark:text-white">{{ t('usage.detail.payloadTitle') }}</h3>
+        <div class="mt-4 space-y-4">
+          <div v-for="section in selfPayloadSections" :key="section.key">
+            <div class="mb-2 flex items-center justify-between gap-2">
+              <span class="text-xs font-bold uppercase tracking-wider text-gray-500 dark:text-gray-400">{{ section.label }}</span>
+              <span v-if="section.truncated" class="text-xs text-amber-600 dark:text-amber-400">{{ t('usage.detail.truncated') }}</span>
+            </div>
+            <pre class="max-h-[520px] overflow-auto rounded-surface border border-gray-200 bg-white p-4 text-xs text-gray-800 dark:border-dark-700 dark:bg-dark-800 dark:text-gray-100"><code>{{ section.body }}</code></pre> <!-- check-ui-allow: 请求快照 JSON 局部高度 -->
+          </div>
+        </div>
+      </div>
+
       <!-- Upstream errors list (only for request errors) -->
       <div v-if="showUpstreamList" class="rounded-surface bg-gray-50 p-6 dark:bg-dark-950">
         <div class="flex flex-wrap items-center justify-between gap-2">
@@ -227,12 +241,14 @@
 import ContentSkeleton from '@/components/common/ContentSkeleton.vue'
 import Collapse from '@/components/common/Collapse.vue'
 
+
 import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import BaseDialog from '@/components/common/BaseDialog.vue'
 import Icon from '@/components/icons/Icon.vue'
 import { useAppStore } from '@/stores'
 import { opsAPI, type OpsErrorDetail } from '@/api/admin/ops'
+import { selfAPI, type SelfRequestPayload } from '@/api/self'
 import { formatDateTime } from '@/utils/format'
 import { resolveUpstreamPayload } from '../utils/errorDetailResponse'
 
@@ -394,16 +410,48 @@ function prettyJSON(raw?: string): string {
 
 async function fetchDetail(id: number) {
   loading.value = true
+  selfPayload.value = null
   try {
     const kind = props.errorType || (detail.value?.phase === 'upstream' ? 'upstream' : 'request')
     const d = kind === 'upstream' ? await opsAPI.getUpstreamErrorDetail(id) : await opsAPI.getRequestErrorDetail(id)
     detail.value = d
+    fetchSelfPayload(d)
   } catch (err: any) {
     detail.value = null
     appStore.showError(err?.message || t('admin.ops.failedToLoadErrorDetail'))
   } finally {
     loading.value = false
   }
+}
+
+// fork 专属：请求头/请求体快照，捕获未开启或数据过期时静默降级。
+const selfPayload = ref<SelfRequestPayload | null>(null)
+
+const selfPayloadSections = computed(() => {
+  const p = selfPayload.value
+  if (!p) return []
+  const sections: Array<{ key: string; label: string; body: string; truncated?: boolean }> = []
+  const requestHeaders = prettySnapshot(p.request_headers)
+  const requestBody = prettySnapshot(p.request_body)
+  if (requestHeaders) sections.push({ key: 'request_headers', label: t('usage.detail.requestHeaders'), body: requestHeaders })
+  if (requestBody) sections.push({ key: 'request_body', label: t('usage.detail.requestBody'), body: requestBody, truncated: p.request_body_truncated })
+  return sections
+})
+
+async function fetchSelfPayload(d: OpsErrorDetail) {
+  const internalID = String(d.client_request_id || '').trim()
+  if (!internalID) return
+  try {
+    selfPayload.value = await selfAPI.getRequestPayload(internalID)
+  } catch {
+    selfPayload.value = null
+  }
+}
+
+function prettySnapshot(raw?: string | null): string {
+  const value = (raw || '').trim()
+  if (!value) return ''
+  return prettyJSON(value)
 }
 
 watch(

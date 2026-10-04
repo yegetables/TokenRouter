@@ -27,6 +27,8 @@ import (
 
 	"github.com/TokenFlux/TokenRouter/internal/protocol"
 
+	"github.com/TokenFlux/TokenRouter/internal/selfcapture"
+
 	"github.com/TokenFlux/TokenRouter/internal/server/middleware"
 
 	"github.com/TokenFlux/TokenRouter/internal/site"
@@ -56,7 +58,8 @@ func installBackgroundTasks(manager *lifecycle.Manager) *lifecycle.Tasks {
 	return tasks
 }
 
-func provideGatewayRouteMiddleware(apiKeyAuth keyhttp.APIKeyAuthMiddleware, apiKeyService *apikey.APIKeyService, subscriptionService *billing.SubscriptionService, opsService *ops.OpsService, cfg *config.Config, queue *ops.ErrorLogQueue, clients *messageHTTPBindings) gatewayhttp.RouteMiddleware {
+// provideGatewayRouteMiddleware 装配网关路由中间件；载荷捕获包装在错误记录中间件外层。
+func provideGatewayRouteMiddleware(apiKeyAuth keyhttp.APIKeyAuthMiddleware, apiKeyService *apikey.APIKeyService, subscriptionService *billing.SubscriptionService, opsService *ops.OpsService, cfg *config.Config, queue *ops.ErrorLogQueue, clients *messageHTTPBindings, selfCaptureStore *selfcapture.Store) gatewayhttp.RouteMiddleware {
 	var clientFallback gatewayhttp.ClientGroupFallbackResolver
 	if clients != nil {
 		clientFallback = clients.bindings.ClientGroupFallback
@@ -64,7 +67,7 @@ func provideGatewayRouteMiddleware(apiKeyAuth keyhttp.APIKeyAuthMiddleware, apiK
 	return gatewayhttp.RouteMiddleware{
 		ClientGroupFallback: clientFallback,
 		APIKeyAuth:          gin.HandlerFunc(apiKeyAuth), GoogleAPIKeyAuth: newGatewayAuthorization(apiKeyService, subscriptionService, cfg, true),
-		BodyLimit: middleware.RequestBodyLimit(cfg.Gateway.MaxBodySize), TextBodyLimit: middleware.RequestBodyLimit(cfg.Gateway.TextMaxBodySize), ClientRequestID: middleware.ClientRequestID(), OpsErrorLogger: gatewayhttp.OpsErrorLoggerMiddleware(opsService, queue, provideOpsObservationAccess()), EndpointNormalization: gatewayhttp.InboundEndpointMiddleware(),
+		BodyLimit: middleware.RequestBodyLimit(cfg.Gateway.MaxBodySize), TextBodyLimit: middleware.RequestBodyLimit(cfg.Gateway.TextMaxBodySize), ClientRequestID: middleware.ClientRequestID(), OpsErrorLogger: selfcapture.Middleware(selfCaptureStore, gatewayhttp.OpsErrorLoggerMiddleware(opsService, queue, provideOpsObservationAccess()), selfcapture.EnvEnabled()), EndpointNormalization: gatewayhttp.InboundEndpointMiddleware(),
 		RequireGroupAnthropic: provideGroupAssignmentGuard(gatewayhttp.AnthropicErrorWriter), RequireGroupGoogle: provideGroupAssignmentGuard(gatewayhttp.GoogleErrorWriter), ForceAntigravity: keyhttp.ForcePlatform(capability.PlatformAntigravity), ForcedPlatform: keyhttp.GetForcePlatformFromContext,
 		Access: func(c *gin.Context) gatewayhttp.RouteAccess {
 			key, ok := keyhttp.GetAPIKeyFromContext(c)

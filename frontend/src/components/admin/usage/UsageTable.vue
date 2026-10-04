@@ -339,6 +339,20 @@
           <span v-else class="text-sm text-gray-400 dark:text-gray-500">-</span>
         </template>
 
+        <!-- 详情操作列：由 showDetailColumn 打开，保持未启用时表格不变。 -->
+        <template v-if="showDetailColumn" #cell-actions="{ row }">
+          <button
+            type="button"
+            class="rounded-compact p-1 text-gray-400 transition-colors hover:bg-gray-100 hover:text-primary-600 dark:hover:bg-dark-700 dark:hover:text-primary-400"
+            :title="t('usage.detail.open')"
+            :aria-label="t('usage.detail.open')"
+            data-test="usage-detail-button"
+            @click.stop="$emit('detail', row)"
+          >
+            <Icon name="search" size="sm" class="h-3.5 w-3.5" />
+          </button>
+        </template>
+
         <template #empty><EmptyState :message="t('usage.noRecords')" /></template>
       </DataTable>
     </div>
@@ -745,6 +759,8 @@ interface Props {
   flat?: boolean
   /** 页面已有独立批量地区按钮时关闭表格内部工具条。 */
   showIpGeoToolbar?: boolean
+  /** 显示"查看详情"操作列（fork 专属功能）。 */
+  showDetailColumn?: boolean
 }
 
 const props = withDefaults(defineProps<Props>(), {
@@ -760,11 +776,13 @@ const props = withDefaults(defineProps<Props>(), {
   compactUserColumn: false,
   flat: false,
   showIpGeoToolbar: true,
+  showDetailColumn: false,
 })
 const emit = defineEmits<{
   userClick: [userID: number, email?: string]
   sort: [key: string, order: 'asc' | 'desc']
   ipGeoBatchFailed: []
+  detail: [row: AdminUsageLog]
 }>()
 const { t } = useI18n()
 const { balanceUnitSymbol, usdUnitSymbol, formatBalanceAmount, formatUsdAmount } = useBalanceDisplay()

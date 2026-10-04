@@ -145,8 +145,10 @@
           :server-side-sort="true"
           :default-sort-key="'created_at'"
           :default-sort-order="'desc'"
+          show-detail-column
           @sort="handleSort"
           @userClick="handleUserClick"
+          @detail="openUsageDetail"
         />
         <Pagination v-if="pagination.total > 0" :page="pagination.page" :total="pagination.total" :page-size="pagination.page_size" @update:page="handlePageChange" @update:pageSize="handlePageSizeChange" />
       </div>
@@ -177,6 +179,7 @@
         />
       </div>
       <OpsErrorDetailModal v-model:show="showErrorModal" :error-id="selectedErrorId" :error-type="'request'" />
+      <UsageLogDetailModal v-model:show="showUsageDetail" :row="usageDetailRow" />
     </div>
   </AppLayout>
   <UsageExportProgress :show="exportProgress.show" :progress="exportProgress.progress" :current="exportProgress.current" :total="exportProgress.total" :estimated-time="exportProgress.estimatedTime" @cancel="cancelExport" />
@@ -217,6 +220,7 @@ import UsageCleanupDialog from '@/components/admin/usage/UsageCleanupDialog.vue'
 import UserBalanceHistoryModal from '@/components/admin/user/UserBalanceHistoryModal.vue'
 import OpsErrorLogTable from '@/views/admin/ops/components/OpsErrorLogTable.vue'
 import OpsErrorDetailModal from '@/views/admin/ops/components/OpsErrorDetailModal.vue'
+import UsageLogDetailModal from '@/components/admin/usage/UsageLogDetailModal.vue'
 import { listErrorLogs } from '@/api/admin/ops'
 import type { OpsErrorLog } from '@/api/admin/ops'
 import ModelDistributionChart from '@/components/charts/ModelDistributionChart.vue'; import GroupDistributionChart from '@/components/charts/GroupDistributionChart.vue'; import TokenUsageTrend from '@/components/charts/TokenUsageTrend.vue'
@@ -941,6 +945,11 @@ const onErrSort = (sortBy: string, sortOrder: 'asc' | 'desc') => {
 const onErrPage = (p: number) => { errPage.value = p; loadAdminErrors() }
 const onErrPageSize = (s: number) => { errPageSize.value = s; errPage.value = 1; loadAdminErrors() }
 const openError = (id: number) => { selectedErrorId.value = id; showErrorModal.value = true }
+
+// fork 专属：用量明细行详情弹窗。
+const showUsageDetail = ref(false)
+const usageDetailRow = ref<AdminUsageLog | null>(null)
+const openUsageDetail = (row: AdminUsageLog) => { usageDetailRow.value = row; showUsageDetail.value = true }
 
 const showColumnDropdown = ref(false)
 const columnDropdownRef = ref<HTMLElement | null>(null)

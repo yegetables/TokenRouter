@@ -19,6 +19,7 @@ import (
 	routingdto "github.com/TokenFlux/TokenRouter/internal/routing/httpapi/dto"
 	routescheduler "github.com/TokenFlux/TokenRouter/internal/scheduler/httpapi"
 	routesearch "github.com/TokenFlux/TokenRouter/internal/search/httpapi"
+	"github.com/TokenFlux/TokenRouter/internal/selfcapture"
 	serverhttp "github.com/TokenFlux/TokenRouter/internal/server/httpapi"
 	"github.com/TokenFlux/TokenRouter/internal/server/middleware"
 	routesettings "github.com/TokenFlux/TokenRouter/internal/settings/httpapi"
@@ -79,6 +80,7 @@ func provideAdminRouteMount(eAdminTLSFingerprintProfile *routeegress.TLSFingerpr
 	eAdminUser *routeidentity.AdminUserHandler[dto.APIKey[routingdto.Group]],
 	eAdminOps *routeops.OpsHandler,
 	eSearch *routesearch.Handler,
+	selfCaptureStore *selfcapture.Store,
 ) adminRouteMount {
 	return func(v1 *gin.RouterGroup, security httpRouteSecurity, protocolCatalog gin.HandlerFunc) {
 		admin := v1.Group("/admin")
@@ -211,6 +213,11 @@ func provideAdminRouteMount(eAdminTLSFingerprintProfile *routeegress.TLSFingerpr
 			// 使用记录管理
 			{
 				routeusageadmin.RegisterUsageRoutes(admin, eAdminUsage)
+			}
+
+			// fork 专属：请求载荷详情查询
+			{
+				selfcapture.RegisterAdminRoutes(admin, selfCaptureStore)
 			}
 
 			// 用户属性管理
