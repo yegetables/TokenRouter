@@ -51,5 +51,8 @@ func TestEffectiveUpstreamUsageConfigDefaultsAndNormalization(t *testing.T) {
 		{Name: UpstreamUsageAdapterSub2API, Label: "Sub2API / TokenRouter"},
 		{Name: UpstreamUsageAdapterNewAPI, Label: "New API"},
 		{Name: UpstreamUsageAdapterZivv, Label: "Zivv"},
+		{Name: UpstreamUsageAdapterZCode, Label: "ZCode Start Plan"},
+		{Name: UpstreamUsageAdapterCline, Label: "Cline"},
+		{Name: UpstreamUsageAdapterClinePass, Label: "ClinePass"},
 	}, UpstreamUsageAdapterOptions())
 }

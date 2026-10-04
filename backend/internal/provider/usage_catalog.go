@@ -10,6 +10,9 @@ const (
 	UpstreamUsageAdapterZhipuCoding     = usageview.UpstreamUsageAdapterZhipuCoding
 	UpstreamUsageAdapterKimiBalance     = usageview.UpstreamUsageAdapterKimiBalance
 	UpstreamUsageAdapterDeepseekBalance = usageview.UpstreamUsageAdapterDeepseekBalance
+	UpstreamUsageAdapterZCode           = usageview.UpstreamUsageAdapterZCode
+	UpstreamUsageAdapterCline           = usageview.UpstreamUsageAdapterCline
+	UpstreamUsageAdapterClinePass       = usageview.UpstreamUsageAdapterClinePass
 	NewAPIUserAccessTokenCredentialKey  = "new_api_user_access_token"
 	NewAPIUserIDCredentialKey           = "new_api_user_id"
 	UpstreamUsageDefaultAdapter         = UpstreamUsageAdapterSub2API
@@ -23,6 +26,9 @@ var usageAdapterCatalog = []UsageAdapterSpec{
 	{Name: UpstreamUsageAdapterZhipuCoding, Label: "Zhipu Coding Plan", Automatic: true},
 	{Name: UpstreamUsageAdapterKimiBalance, Label: "Kimi Balance", Automatic: true},
 	{Name: UpstreamUsageAdapterDeepseekBalance, Label: "DeepSeek Balance", Automatic: true},
+	{Name: UpstreamUsageAdapterZCode, Label: "ZCode Start Plan", Automatic: false},
+	{Name: UpstreamUsageAdapterCline, Label: "Cline", Automatic: false},
+	{Name: UpstreamUsageAdapterClinePass, Label: "ClinePass", Automatic: false},
 }
 
 // UsageAdapterSpec 声明用量适配器的目录属性。

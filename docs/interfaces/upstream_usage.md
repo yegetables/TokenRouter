@@ -14,7 +14,7 @@
 }
 ```
 
-普通 API Key 提供商没有这个对象时，按 `enabled=true`、`adapter=sub2api` 处理，根地址使用提供商现有的 API Base URL。只有明确写 `enabled=false` 才关闭查询。管理员可以选择的 `adapter` 只有 `sub2api`、`new_api` 和 `zivv`；Kimi、Zhipu、DeepSeek 忽略这个字段，按平台和 `provider_mode` 选择固定的内置适配器。`base_url` 只能覆盖查询的根地址，不能带用户信息、查询串或片段。后端照常执行 HTTPS、allowlist、私网地址和 URL 格式的校验。
+普通 API Key 提供商没有这个对象时，按 `enabled=true`、`adapter=sub2api` 处理，根地址使用提供商现有的 API Base URL。只有明确写 `enabled=false` 才关闭查询。管理员可以选择的 `adapter` 有 `sub2api`、`new_api`、`zivv`、`zcode`、`cline` 和 `cline_pass`；Kimi、Zhipu、DeepSeek 忽略这个字段，按平台和 `provider_mode` 选择固定的内置适配器。`base_url` 只能覆盖查询的根地址，不能带用户信息、查询串或片段。后端照常执行 HTTPS、allowlist、私网地址和 URL 格式的校验。
 
 API Key 始终从提供商的 `credentials` 读取，不会出现在 `extra`、接口响应、审计请求体、浏览器缓存和日志里。用户也无法配置任意的路径、方法、Header 模板或脚本。
 
@@ -47,6 +47,14 @@ New API 的钱包需要用户级认证时，可以在 `credentials` 里保存 `n
 严格请求 `GET /v1/user/balance`，带 `Authorization: Bearer <api_key>`。响应里的 `balance` 是钱包剩余余额，`total_used` 是累计已用金额；`key_limit` 和 `key_used` 归一化为 Key 的限额，`key_limit=0` 表示不限额，`plan_name` 用于展示订阅计划。`currency` 目前支持 `USD`、`CNY` 和 `TOKENS`。
 
 Zivv 的公开开发者文档说明余额在控制台的钱包页面，适配器使用它前端生成的固定余额接口，不请求任意路径，也不执行脚本。参见 [Zivv 计费说明](https://docs.zivv.pro/billing/overview) 和 [API 端点](https://docs.zivv.pro/reference/endpoints)。
+
+### Cline
+
+对按量计费（usage-billing）账户，查 credit 余额。先请求 `GET /api/v1/users/me` 取用户 id，再请求 `GET /api/v1/users/{id}/balance`，均带 `Authorization: Bearer <api_key>`。响应是 `{success, data}` 信封，`data.balance` 以美分计，归一化为 `Unit=USD` 的钱包 `balance.remaining`（除以 100）。`success=false`、缺 id 或 balance 字段类型不对时拒绝整份响应。ClinePass 订阅的百分比窗口由 ClinePass 适配器负责；两种账户可以在同一个 Cline 账号上并存，各自配一个适配器。
+
+### ClinePass
+
+对 ClinePass 月订阅账户，请求 `GET /api/v1/users/me/plan/usage-limits`，把 `data.limits[]` 里 five_hour、weekly、monthly 三个滚动窗口的 `percentUsed` 归一化为 `Unit=PERCENT` 的限额（上限恒为 100），缺席的窗口跳过，未知窗口类型不拒绝整份响应。
 
 ### 国产供应商
 

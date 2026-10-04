@@ -12,6 +12,9 @@ const (
 	UpstreamUsageAdapterZhipuCoding     = "zhipu_coding"
 	UpstreamUsageAdapterKimiBalance     = "kimi_balance"
 	UpstreamUsageAdapterDeepseekBalance = "deepseek_balance"
+	UpstreamUsageAdapterZCode           = "zcode"
+	UpstreamUsageAdapterCline           = "cline"
+	UpstreamUsageAdapterClinePass       = "cline_pass"
 )
 
 // UpstreamUsageAmount 表示余额或累计限额的三个可选维度。

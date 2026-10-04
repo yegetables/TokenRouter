@@ -424,8 +424,12 @@ export default {
         adapters: {
           sub2api: 'Sub2API / TokenRouter',
           newApi: 'New API',
-          zivv: 'Zivv'
+          zivv: 'Zivv',
+          zcode: 'ZCode Start Plan',
+          cline: 'Cline',
+          clinePass: 'ClinePass'
         },
+        zcodeNotice: 'Targets the community project {link}; community-maintained, not an officially supported platform.',
         errors: {
           UPSTREAM_USAGE_UNAVAILABLE: 'Upstream usage query service is unavailable',
           UPSTREAM_USAGE_BATCH_INVALID: 'Invalid batch query parameters',
