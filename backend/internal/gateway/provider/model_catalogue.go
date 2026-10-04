@@ -5,6 +5,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/TokenFlux/TokenRouter/internal/gateway/media"
 	"github.com/TokenFlux/TokenRouter/internal/gateway/requeststate"
 	"github.com/TokenFlux/TokenRouter/internal/modelcatalog"
 	"github.com/TokenFlux/TokenRouter/internal/provider"
@@ -35,7 +36,8 @@ func (v catalogueRules) SupportsClientProtocol(model string, source capability.P
 	if embedding || source == capability.ProtocolEmbeddings {
 		return embedding && source == capability.ProtocolEmbeddings
 	}
-	image := upstream.IsGPTImageGenerationModel(model) || upstream.IsGrokImageGenerationModel(model)
+	// 与 images 端点放行、账号选路共用同一生图模型判定，第三方兼容生图模型不在这里被漏掉。
+	image := media.IsImageGenerationModel(model)
 	if source == capability.ProtocolImagesGenerations || source == capability.ProtocolImagesEdits {
 		return image
 	}

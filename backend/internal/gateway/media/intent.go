@@ -484,11 +484,7 @@ func (p ImageIntentPolicy) ResolveOpenAIResponsesImageBillingConfigDetailedFromB
 }
 
 func (p ImageIntentPolicy) IsOpenAIImageBillingModelAlias(model string) bool {
-	normalized := strings.ToLower(strings.TrimSpace(model))
-	if normalized == "" {
-		return false
-	}
-	return IsImageGenerationModel(normalized) || strings.Contains(normalized, "image")
+	return IsImageBillingModelAlias(model)
 }
 
 func (p ImageIntentPolicy) OpenAIJSONString(value gjson.Result) string {

@@ -102,8 +102,16 @@ func (r *ImageRequest) ValidateRoutingModel(routingModel string) error {
 	return nil
 }
 
+// IsImageGenerationModel 判断模型是否为可承接图片入口的生图模型：原生生图族、已登记
+// 的第三方兼容模型或名称含 image。账号选路、模型目录投影与图片计费共用此判定，
+// 名单由 internal/upstream 唯一持有。
 func IsImageGenerationModel(model string) bool {
-	return IsGPTImageGenerationModel(model) || IsGrokImageGenerationModel(model)
+	return upstreamcore.IsImageGenerationModel(model)
+}
+
+// IsImageBillingModelAlias 保留旧名，口径与 IsImageGenerationModel 一致。
+func IsImageBillingModelAlias(model string) bool {
+	return IsImageGenerationModel(model)
 }
 
 func IsGPTImageGenerationModel(model string) bool {
@@ -116,7 +124,9 @@ func IsGrokImageGenerationModel(model string) bool {
 
 func ValidateImageModel(model string) error {
 	model = strings.TrimSpace(model)
-	if IsImageGenerationModel(model) {
+	// 生图模型判定已统一到 IsImageGenerationModel：原生生图族或名称含 image 的
+	// OpenAI 兼容第三方模型都放行，普通文本模型仍被拒。
+	if IsImageBillingModelAlias(model) {
 		return nil
 	}
 	if model == "" {

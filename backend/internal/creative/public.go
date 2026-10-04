@@ -442,7 +442,13 @@ func CreativeCapabilitiesForModel(platform, model string) CreativeModelCapabilit
 	normalizedModel := CreativeNormalizedModelID(model)
 	switch normalizedPlatform {
 	case PlatformOpenAI:
-		if !upstream.IsGPTImageGenerationModel(normalizedModel) {
+		if !IsCreativeOpenAIImageModel(normalizedModel) {
+			return capabilities
+		}
+		if profile := CreativeOpenAICompatImageProfileFor(normalizedModel); profile != nil {
+			// 第三方兼容生图模型只暴露其真实支持的比例；quality/background 不支持，
+			// 留空后上游请求不会携带这些字段。编辑源图上限沿用能力表初始值 1。
+			capabilities.AspectRatios = append([]string(nil), profile.AspectRatios...)
 			return capabilities
 		}
 		capabilities.AspectRatios = []string{"1:1", "4:3", "3:4", "16:9", "9:16"}
@@ -518,6 +524,12 @@ func CreativeFilterImageSizesForModel(platform, model string, sizes []string) []
 	platform = strings.TrimSpace(platform)
 	if platform == PlatformGrok && upstream.IsGrokImageGenerationModel(model) {
 		return CreativeFilterImageSizes(sizes, "1K", "2K")
+	}
+	if platform == PlatformOpenAI {
+		if profile := CreativeOpenAICompatImageProfileFor(model); profile != nil && profile.SizeAsRatio {
+			// 比例式第三方生图模型的分辨率档位无意义（比例由请求 size 表达），固定 1K。
+			return CreativeFilterImageSizes(sizes, "1K")
+		}
 	}
 	if platform == PlatformOpenAI && upstream.IsGPTImageGenerationModel(model) && !IsCreativeGPTImage2Model(model) {
 		return CreativeFilterImageSizes(sizes, "1K", "2K")

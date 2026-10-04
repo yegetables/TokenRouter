@@ -36,7 +36,7 @@ func (p compatibleTextHTTPBackend) ImageContext(ctx context.Context) context.Con
 }
 
 func (p compatibleTextHTTPBackend) ChatImageModel(model string, mapping routing.GroupMappingResult) bool {
-	return media.IsGPTImageGenerationModel(requeststate.GroupMappedModel(model, mapping))
+	return media.IsImageGenerationModel(requeststate.GroupMappedModel(model, mapping))
 }
 
 func (p compatibleTextHTTPBackend) Moderate(c *gin.Context, log *zap.Logger, key *apikey.APIKey, subject authctx.AuthSubject, protocol, model string, body []byte) *moderation.Decision {
