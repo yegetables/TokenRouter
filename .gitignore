@@ -157,3 +157,6 @@ output/
 
 # Python 字节码缓存。
 __pycache__/
+
+# 本地数据库导出（不入库）
+.db-export/
