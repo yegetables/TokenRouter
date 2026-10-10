@@ -682,12 +682,8 @@ func TestBackupService_ContentConfigDefaultsExcludeLargeHistory(t *testing.T) {
 	require.Contains(t, cfg.ExcludedTableData, "public.usage_analytics_aggregation_state")
 	require.Contains(t, cfg.ExcludedTableData, "public.pending_auth_sessions")
 	require.Contains(t, cfg.ExcludedTableData, "public.identity_adoption_decisions")
-	require.Len(t, cfg.ExcludedTableData, 32)
+	require.Len(t, cfg.ExcludedTableData, 35)
 	require.Contains(t, cfg.ExcludedTableData, "public.request_records")
-	// 已删除的遗留表不再出现在备份内容清单里。
-	require.NotContains(t, cfg.ExcludedTableData, "public.billing_usage_entries")
-	require.NotContains(t, cfg.ExcludedTableData, "public.orphan_allowed_groups_audit")
-	require.NotContains(t, cfg.ExcludedTableData, "public.auth_identity_migration_reports")
 
 	_, err = svc.CreateBackup(context.Background(), "manual", 14)
 	require.NoError(t, err)

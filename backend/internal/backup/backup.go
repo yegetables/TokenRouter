@@ -57,6 +57,7 @@ var (
 			"public.usage_logs",
 			"public.usage_user_activity",
 			"public.usage_logs_*",
+			"public.billing_usage_entries",
 			"public.usage_billing_dedup",
 			"public.usage_billing_dedup_archive",
 			"public.usage_dashboard_hourly",
@@ -84,6 +85,8 @@ var (
 			"public.payment_audit_logs",
 			"public.content_moderation_logs",
 			"public.announcement_reads",
+			"public.orphan_allowed_groups_audit",
+			"public.auth_identity_migration_reports",
 		},
 		"runtime_data": {
 			"public.idempotency_records",
