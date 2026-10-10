@@ -149,7 +149,7 @@ func TestProviderFromServiceShallow_EchoesRegisteredUpstreamUsageAdapters(t *tes
 				"enabled": true, "adapter": option.Name,
 			}},
 		}
-		got := dto.ProviderFromRecordShallow(src)
+		got := ProviderFromRecordShallow(src)
 		require.Equal(t, map[string]any{
 			"enabled": true, "adapter": option.Name,
 		}, got.Extra[provider.UpstreamUsageQueryExtraKey], "adapter %s 应原样回显", option.Name)

@@ -91,3 +91,31 @@ func TestIsGrokImageGenerationModel(t *testing.T) {
 		})
 	}
 }
+
+// TestValidateImageModelAllowsThirdPartyImageAliases 检验 images 端点放行第三方兼容生图模型。
+// 回归背景：端点原先只放行 gpt-image-* 与 grok-imagine*，qwen-image-2.0 等被 400 拒绝。
+func TestValidateImageModelAllowsThirdPartyImageAliases(t *testing.T) {
+	for _, model := range []string{
+		"qwen-image-2.0",
+		"wan2.7-image",
+		"gemini-3.1-flash-lite-image",
+		"gpt-image-1",
+		// grok-imagine 不含 image 子串（imagine 与 image 不同），只能靠原生判定放行。
+		"grok-imagine",
+	} {
+		t.Run(model, func(t *testing.T) {
+			require.NoError(t, ValidateImageModel(model))
+			require.True(t, IsImageBillingModelAlias(model))
+		})
+	}
+}
+
+// TestValidateImageModelRejectsNonImageModels 检验普通文本模型仍被 images 端点拒绝。
+func TestValidateImageModelRejectsNonImageModels(t *testing.T) {
+	for _, model := range []string{"gpt-5.4", "deepseek-flash", "glm-5.3"} {
+		t.Run(model, func(t *testing.T) {
+			require.ErrorContains(t, ValidateImageModel(model), "images endpoint requires an image model")
+			require.False(t, IsImageBillingModelAlias(model))
+		})
+	}
+}

@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"mime/multipart"
 	"net/http"
+	"slices"
 	"strings"
 	"time"
 
@@ -227,10 +228,8 @@ func CreativeOpenAIRequestImageSize(model, imageSize, aspectRatio string) string
 		return CreativeOpenAIImageSize(imageSize, aspectRatio)
 	}
 	ratio := strings.TrimSpace(aspectRatio)
-	for _, supported := range profile.AspectRatios {
-		if ratio == supported {
-			return ratio
-		}
+	if slices.Contains(profile.AspectRatios, ratio) {
+		return ratio
 	}
 	if len(profile.AspectRatios) > 0 {
 		return profile.AspectRatios[0]

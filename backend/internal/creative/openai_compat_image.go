@@ -1,4 +1,3 @@
-// 第三方 OpenAI 兼容生图模型的契约注册表：执行器与目录共用同一来源。
 package creative
 
 import (
