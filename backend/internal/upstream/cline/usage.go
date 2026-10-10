@@ -4,12 +4,16 @@ import (
 	"context"
 	"strings"
 
+	"github.com/tidwall/gjson"
+
 	"github.com/TokenFlux/TokenRouter/internal/infra/httpclient"
 	"github.com/TokenFlux/TokenRouter/internal/upstream/internal/usageclient"
 	"github.com/TokenFlux/TokenRouter/internal/upstream/usagecontract"
 	"github.com/TokenFlux/TokenRouter/internal/upstream/usageview"
-	"github.com/tidwall/gjson"
 )
+
+// clineAPIPrefix 是 Cline 账户 API 的路径前缀，自带 /api/v1。
+const clineAPIPrefix = "/api/v1"
 
 // ClineUsageAdapter 对接 Cline 按量计费（usage-billing）账户的 credit 余额。
 // 余额端点需要用户 id，先请求 /users/me 取 id，再请求 /users/{id}/balance；
@@ -18,9 +22,6 @@ import (
 type ClineUsageAdapter struct{}
 
 func (*ClineUsageAdapter) Name() string { return usageview.UpstreamUsageAdapterCline }
-
-// clineAPIPrefix 是 Cline 账户 API 的路径前缀，自带 /api/v1。
-const clineAPIPrefix = "/api/v1"
 
 // clineBaseURL 返回用量查询的站点根地址。提供商 base_url 按聊天端点的填写习惯
 // 以 /api 或 /api/v1 结尾，直接拼接会得到 /api/api 重复段，先剥掉末尾的版本段

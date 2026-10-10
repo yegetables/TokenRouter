@@ -4,8 +4,9 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/TokenFlux/TokenRouter/internal/creative"
 	"github.com/stretchr/testify/require"
+
+	"github.com/TokenFlux/TokenRouter/internal/creative"
 )
 
 // 比例式第三方模型请求 size 传比例串，像素式与 GPT Image 传 WIDTHxHEIGHT。

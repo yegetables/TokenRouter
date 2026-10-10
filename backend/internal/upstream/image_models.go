@@ -2,6 +2,19 @@ package upstream
 
 import "strings"
 
+// 已登记的第三方 OpenAI 兼容生图模型前缀。登记后的模型即使名称不含 image 也会被识别。
+const (
+	OpenAICompatImagePrefixQwenImage       = "qwen-image"
+	OpenAICompatImagePrefixWanImage        = "wan2.7-image"
+	OpenAICompatImagePrefixGeminiFlashLite = "gemini-3.1-flash-lite-image"
+)
+
+var openAICompatImageModelPrefixes = []string{
+	OpenAICompatImagePrefixQwenImage,
+	OpenAICompatImagePrefixWanImage,
+	OpenAICompatImagePrefixGeminiFlashLite,
+}
+
 // IsGeminiImageGenerationModel 判断模型是否为图片生成模型
 // 支持的模型：gemini-3.1-flash-image, gemini-3-pro-image, gemini-2.5-flash-image 等。
 func IsGeminiImageGenerationModel(model string) bool {
@@ -32,19 +45,6 @@ func IsGrokImageGenerationModel(model string) bool {
 	return model == "grok-imagine" ||
 		model == "grok-imagine-edit" ||
 		strings.HasPrefix(model, "grok-imagine-image")
-}
-
-// 已登记的第三方 OpenAI 兼容生图模型前缀。登记后的模型即使名称不含 image 也会被识别。
-const (
-	OpenAICompatImagePrefixQwenImage       = "qwen-image"
-	OpenAICompatImagePrefixWanImage        = "wan2.7-image"
-	OpenAICompatImagePrefixGeminiFlashLite = "gemini-3.1-flash-lite-image"
-)
-
-var openAICompatImageModelPrefixes = []string{
-	OpenAICompatImagePrefixQwenImage,
-	OpenAICompatImagePrefixWanImage,
-	OpenAICompatImagePrefixGeminiFlashLite,
 }
 
 // IsOpenAICompatImageModel 判断模型是否为已登记的第三方 OpenAI 兼容生图模型。

@@ -7,14 +7,16 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/stretchr/testify/require"
+
 	"github.com/TokenFlux/TokenRouter/internal/upstream/usagecontract"
 	"github.com/TokenFlux/TokenRouter/internal/upstream/usageview"
-	"github.com/stretchr/testify/require"
 )
 
-const sampleMe = `{"success": true, "data": {"id": "user-abc", "email": "a@b.c"}}`
-
-const sampleBalance = `{"success": true, "data": {"balance": 123456, "userId": "user-abc"}}`
+const (
+	sampleMe      = `{"success": true, "data": {"id": "user-abc", "email": "a@b.c"}}`
+	sampleBalance = `{"success": true, "data": {"balance": 123456, "userId": "user-abc"}}`
+)
 
 // Query 先取 /users/me 的 id，再携带 Bearer 请求 /users/{id}/balance，
 // 美分余额换算成美元。

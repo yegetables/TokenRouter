@@ -6,20 +6,16 @@ import (
 	"strings"
 	"time"
 
+	"github.com/tidwall/gjson"
+
 	"github.com/TokenFlux/TokenRouter/internal/infra/httpclient"
 	"github.com/TokenFlux/TokenRouter/internal/upstream/internal/usageclient"
 	"github.com/TokenFlux/TokenRouter/internal/upstream/usagecontract"
 	"github.com/TokenFlux/TokenRouter/internal/upstream/usageview"
-	"github.com/tidwall/gjson"
 )
 
-// ClinePassUsageAdapter 对接 ClinePass 订阅的用量窗口端点。
-// 上游只报告已用百分比（percentUsed，数字或字符串都有出现）与可选的重置时间，
-// 没有绝对 token/金额数；三个滚动窗口 five_hour/weekly/monthly 各映射为一条
-// PERCENT 限额（limit 恒为 100）。缺席的窗口不会出现在结果中。
-type ClinePassUsageAdapter struct{}
-
-func (*ClinePassUsageAdapter) Name() string { return usageview.UpstreamUsageAdapterClinePass }
+// clineUsagePath 是 Cline 订阅用量端点，路径自带 /api/v1 前缀。
+const clineUsagePath = "/api/v1/users/me/plan/usage-limits"
 
 // windowNames 把上游窗口类型映射为面板显示名；未知类型跳过而不是拒绝，
 // 上游新增窗口类型不应导致已支持窗口的查询整体失败。
@@ -29,8 +25,13 @@ var windowNames = map[string]string{
 	"monthly":   "monthly",
 }
 
-// clineUsagePath 是 Cline 订阅用量端点，路径自带 /api/v1 前缀。
-const clineUsagePath = "/api/v1/users/me/plan/usage-limits"
+// ClinePassUsageAdapter 对接 ClinePass 订阅的用量窗口端点。
+// 上游只报告已用百分比（percentUsed，数字或字符串都有出现）与可选的重置时间，
+// 没有绝对 token/金额数；三个滚动窗口 five_hour/weekly/monthly 各映射为一条
+// PERCENT 限额（limit 恒为 100）。缺席的窗口不会出现在结果中。
+type ClinePassUsageAdapter struct{}
+
+func (*ClinePassUsageAdapter) Name() string { return usageview.UpstreamUsageAdapterClinePass }
 
 // clineBaseURL 返回用量查询的站点根地址。提供商 base_url 按聊天端点的填写习惯
 // 以 /api 或 /api/v1 结尾，直接拼接会得到 /api/api 重复段，先剥掉末尾的版本段

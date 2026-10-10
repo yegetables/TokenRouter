@@ -7,18 +7,6 @@ import (
 	"github.com/TokenFlux/TokenRouter/internal/upstream"
 )
 
-// CreativeOpenAICompatImageProfile 描述经 OpenAI 兼容 images 协议接入的第三方生图模型契约。
-// 新增同类模型只需在 creativeOpenAICompatImageProfiles 登记一条，无需改动执行器与目录逻辑。
-type CreativeOpenAICompatImageProfile struct {
-	// AspectRatios 是暴露给创作台的比例集合。不按契约收窄会让用户选到上游不支持的比例。
-	AspectRatios []string
-	// SizeAsRatio 为 true 时请求 size 传比例串（如 9:16）；否则传 WIDTHxHEIGHT 像素尺寸。
-	SizeAsRatio bool
-	// RequireResponseFormat 为 true 时显式请求 response_format=b64_json。
-	// 上游默认只回 data[].url 时必须开启，否则创作台解析不到图片本体。
-	RequireResponseFormat bool
-}
-
 // creativeOpenAICompatImageProfiles 按模型名前缀登记第三方生图模型契约，匹配小写归一后的模型名。
 // 编辑源图上限沿用能力表的初始值 1，与这三个上游的实际能力一致，因此不单独登记。
 var creativeOpenAICompatImageProfiles = []struct {
@@ -49,6 +37,18 @@ var creativeOpenAICompatImageProfiles = []struct {
 			RequireResponseFormat: true,
 		},
 	},
+}
+
+// CreativeOpenAICompatImageProfile 描述经 OpenAI 兼容 images 协议接入的第三方生图模型契约。
+// 新增同类模型只需在 creativeOpenAICompatImageProfiles 登记一条，无需改动执行器与目录逻辑。
+type CreativeOpenAICompatImageProfile struct {
+	// AspectRatios 是暴露给创作台的比例集合。不按契约收窄会让用户选到上游不支持的比例。
+	AspectRatios []string
+	// SizeAsRatio 为 true 时请求 size 传比例串（如 9:16）；否则传 WIDTHxHEIGHT 像素尺寸。
+	SizeAsRatio bool
+	// RequireResponseFormat 为 true 时显式请求 response_format=b64_json。
+	// 上游默认只回 data[].url 时必须开启，否则创作台解析不到图片本体。
+	RequireResponseFormat bool
 }
 
 // CreativeOpenAICompatImageProfileFor 返回模型命中的第三方生图契约；未登记返回 nil。
