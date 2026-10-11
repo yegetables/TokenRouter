@@ -867,7 +867,7 @@ import UpstreamRequestIdHeaderField from '@/components/provider/UpstreamRequestI
 import Icon from '@/components/icons/Icon.vue'
 import ProviderModelMappingEditor from '@/components/provider/ProviderModelMappingEditor.vue'
 import type { TempUnschedRuleForm } from '@/components/provider/TempUnschedRulesEditor.vue'
-import type { ModelMappingRow } from '@/utils/modelMappingRules'
+import { overwriteSelfMappings, type ModelMappingRow } from '@/utils/modelMappingRules'
 import ProxySelector from '@/components/common/ProxySelector.vue'
 import GroupSelector from '@/components/common/GroupSelector.vue'
 import CodexImageToolModeSelector from '@/components/provider/CodexImageToolModeSelector.vue'
@@ -2030,26 +2030,21 @@ const syncAntigravityUpstreamModels = async () => {
   isSyncingAntigravityUpstream.value = true
   try {
     const result = await adminAPI.providers.syncUpstreamModels(props.provider.id)
-    const upstreamModels = result.models.map((model) => model.trim()).filter(Boolean)
+    const upstreamModels = [...new Set(result.models.map((model) => model.trim()).filter(Boolean))]
     if (upstreamModels.length === 0) {
       appStore.showInfo(t('admin.providers.syncUpstreamModelsEmpty'))
       return
     }
 
-    let addedCount = 0
-    for (const model of upstreamModels) {
-      const exists = antigravityModelMappings.value.some((mapping) => mapping.from === model)
-      if (!exists) {
-        antigravityModelMappings.value.push({ from: model, to: model })
-        addedCount += 1
-      }
+    // 覆盖只替换自映射，自定义改写（from≠to）原样保留。
+    const syncedMappings = overwriteSelfMappings(antigravityModelMappings.value, upstreamModels)
+
+    if (!window.confirm(t('admin.providers.syncAntigravityModelsConfirm', { count: upstreamModels.length }))) {
+      return
     }
 
-    if (addedCount > 0) {
-      appStore.showSuccess(t('admin.providers.syncUpstreamModelsSuccess', { count: addedCount, total: upstreamModels.length }))
-    } else {
-      appStore.showInfo(t('admin.providers.syncUpstreamModelsNoChanges', { count: upstreamModels.length }))
-    }
+    antigravityModelMappings.value = syncedMappings
+    appStore.showSuccess(t('admin.providers.syncAntigravityModelsSuccess', { count: upstreamModels.length }))
   } catch (error) {
     const message = error instanceof Error ? error.message : t('admin.providers.syncUpstreamModelsFailed')
     appStore.showError(t('admin.providers.syncUpstreamModelsError', { message }))

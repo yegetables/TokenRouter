@@ -5,6 +5,7 @@ import {
   WILDCARD_ONLY_RULES,
   firstModelMappingIssue,
   mappingRowsToRecord,
+  overwriteSelfMappings,
   recordToMappingRows,
   validateModelMappingRows,
 } from '../modelMappingRules'
@@ -93,5 +94,41 @@ describe('映射对象转换', () => {
       { from: 'a', to: '2' },
     ])
     expect(recordToMappingRows(null)).toEqual([])
+  })
+})
+
+describe('overwriteSelfMappings', () => {
+  it('用上游型号覆盖自映射', () => {
+    expect(overwriteSelfMappings([{ from: 'old', to: 'old' }], ['a', 'b'])).toEqual([
+      { from: 'a', to: 'a' },
+      { from: 'b', to: 'b' },
+    ])
+  })
+
+  it('保留 from≠to 的自定义改写，且不重复登记同来源的上游型号', () => {
+    expect(
+      overwriteSelfMappings(
+        [
+          { from: 'claude-opus-5', to: 'claude-opus-5-20260101' },
+          { from: 'legacy', to: 'legacy' },
+        ],
+        ['legacy', 'claude-opus-5'],
+      ),
+    ).toEqual([
+      { from: 'legacy', to: 'legacy' },
+      { from: 'claude-opus-5', to: 'claude-opus-5-20260101' },
+    ])
+  })
+
+  it('丢弃空来源与上游不再返回的自映射', () => {
+    expect(
+      overwriteSelfMappings(
+        [
+          { from: '', to: 'x' },
+          { from: 'gone', to: 'gone' },
+        ],
+        ['keep'],
+      ),
+    ).toEqual([{ from: 'keep', to: 'keep' }])
   })
 })

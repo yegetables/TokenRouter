@@ -139,3 +139,19 @@ export function recordToMappingRows(
 ): ModelMappingRow[] {
   return Object.entries(mapping ?? {}).map(([from, to]) => ({ from, to }))
 }
+
+/**
+ * overwriteSelfMappings 用上游型号覆盖映射里的自映射，保留 from≠to 的自定义改写。
+ * 上游型号与自定义改写的来源重名时保留自定义改写，空来源的行不进入结果。
+ */
+export function overwriteSelfMappings(
+  rows: ModelMappingRow[],
+  upstreamModels: string[],
+): ModelMappingRow[] {
+  const customMappings = rows.filter((row) => row.from.trim().length > 0 && row.from !== row.to)
+  const customSources = new Set(customMappings.map((row) => row.from))
+  const selfMappings = upstreamModels
+    .filter((model) => !customSources.has(model))
+    .map((model) => ({ from: model, to: model }))
+  return [...selfMappings, ...customMappings]
+}

@@ -70,8 +70,14 @@ function mountSelector(props: Record<string, unknown> = {}) {
 }
 
 describe('ModelWhitelistSelector', () => {
-  afterEach(() => { vi.useRealTimers() })
+  let confirmSpy: ReturnType<typeof vi.spyOn>
+
+  afterEach(() => {
+    vi.useRealTimers()
+    confirmSpy.mockRestore()
+  })
   beforeEach(() => {
+    confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true)
     catalogDefaults.mockReset()
     syncUpstreamModels.mockReset()
     syncUpstreamModelsPreview.mockReset()
@@ -153,6 +159,39 @@ describe('ModelWhitelistSelector', () => {
     expect(syncUpstreamModels).toHaveBeenCalledWith(7)
     expect(syncUpstreamModelsPreview).not.toHaveBeenCalled()
     expect(wrapper.emitted('update:modelValue')?.[0]?.[0]).toEqual(['claude-sonnet-4-5'])
+  })
+
+  it('同步上游模型时用上游列表覆盖白名单', async () => {
+    syncUpstreamModels.mockResolvedValue({ models: ['gpt-5.1', 'o3'] })
+    const wrapper = mountSelector({ providerId: 7, modelValue: ['legacy-local', 'gpt-5.1'] })
+
+    const button = wrapper.findAll('button').find((item) => item.text().includes('admin.providers.syncUpstreamModels'))
+    await button!.trigger('click')
+
+    expect(wrapper.emitted('update:modelValue')?.[0]?.[0]).toEqual(['gpt-5.1', 'o3'])
+    expect(showSuccess).toHaveBeenCalled()
+  })
+
+  it('取消确认时不修改白名单', async () => {
+    confirmSpy.mockReturnValue(false)
+    syncUpstreamModels.mockResolvedValue({ models: ['gpt-5.1'] })
+    const wrapper = mountSelector({ providerId: 7, modelValue: ['legacy-local'] })
+
+    const button = wrapper.findAll('button').find((item) => item.text().includes('admin.providers.syncUpstreamModels'))
+    await button!.trigger('click')
+
+    expect(wrapper.emitted('update:modelValue')).toBeUndefined()
+  })
+
+  it('白名单与上游一致时提示无变化', async () => {
+    syncUpstreamModels.mockResolvedValue({ models: ['gpt-5.1', 'o3'] })
+    const wrapper = mountSelector({ providerId: 7, modelValue: ['gpt-5.1', 'o3'] })
+
+    const button = wrapper.findAll('button').find((item) => item.text().includes('admin.providers.syncUpstreamModels'))
+    await button!.trigger('click')
+
+    expect(wrapper.emitted('update:modelValue')).toBeUndefined()
+    expect(showInfo).toHaveBeenCalled()
   })
 
   it('显式候选包含目录未知型号，空候选保持为空', async () => {
