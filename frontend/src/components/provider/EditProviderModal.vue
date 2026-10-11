@@ -1317,6 +1317,7 @@ const showGeminiTier = computed(() =>
 )
 const apiKeyBaseUrlPlaceholder = computed(() => {
   switch (props.provider?.platform) {
+    case 'jev': return 'https://api.typesafe.ai'
     case 'openai': return 'https://api.openai.com'
     case 'gemini': return 'https://generativelanguage.googleapis.com'
     case 'antigravity': return 'https://cloudcode-pa.googleapis.com'
@@ -1326,6 +1327,7 @@ const apiKeyBaseUrlPlaceholder = computed(() => {
 })
 const apiKeyPlaceholder = computed(() => {
   switch (props.provider?.platform) {
+    case 'jev': return 'api-key-...'
     case 'openai': return 'sk-proj-...'
     case 'gemini': return geminiProviderType.value === 'third_party' ? 'api-key-...' : 'AIza...'
     case 'antigravity': return 'sk-...'
@@ -1397,8 +1399,9 @@ const planTypeOptions = computed(() =>
 )
 const openAIOAuthClientPolicyOptions = useOpenAIOAuthClientPolicyOptions()
 
-// Computed: default base URL based on platform
+// 缺省上游地址由平台及当前模式决定。
 const defaultBaseUrl = computed(() => {
+  if (props.provider?.platform === 'jev') return 'https://api.typesafe.ai'
   if (props.provider?.platform === 'openai') return 'https://api.openai.com'
   if (props.provider?.platform === 'gemini') return 'https://generativelanguage.googleapis.com'
   if (props.provider?.platform === 'grok') return 'https://api.x.ai/v1'
@@ -1599,7 +1602,7 @@ const syncFormFromProvider = (newProvider: Provider | null) => {
   // Load mixed scheduling setting (only for antigravity providers)
   allowOverages.value = false
   const extra = newProvider.extra as Record<string, unknown> | undefined
-  upstreamUsageEnabled.value = true
+  upstreamUsageEnabled.value = newProvider.platform !== 'jev'
   upstreamUsageAdapter.value = 'sub2api'
   upstreamUsageBaseUrl.value = ''
   upstreamUsageWalletAccessToken.value = ''
@@ -1607,7 +1610,7 @@ const syncFormFromProvider = (newProvider: Provider | null) => {
   if (newProvider.type === 'apikey') {
     const rawUsageConfig = extra?.upstream_usage_query as Record<string, unknown> | undefined
     if (rawUsageConfig && typeof rawUsageConfig === 'object') {
-      upstreamUsageEnabled.value = rawUsageConfig.enabled !== false
+      upstreamUsageEnabled.value = typeof rawUsageConfig.enabled === 'boolean' ? rawUsageConfig.enabled : newProvider.platform !== 'jev'
       if (isUpstreamUsageAdapter(rawUsageConfig.adapter)) {
         upstreamUsageAdapter.value = rawUsageConfig.adapter
       }
@@ -1851,17 +1854,19 @@ const syncFormFromProvider = (newProvider: Provider | null) => {
       }
     }
     const platformDefaultUrl =
-      newProvider.platform === 'openai'
-        ? 'https://api.openai.com'
-        : newProvider.platform === 'gemini'
-          ? 'https://generativelanguage.googleapis.com'
-          : newProvider.platform === 'grok'
-            ? 'https://api.x.ai/v1'
-            : newProvider.platform === 'kimi' ||
-                newProvider.platform === 'zhipu' ||
-                newProvider.platform === 'deepseek'
-              ? defaultCNBaseUrl(newProvider.platform, editProviderMode.value, editApiProtocol.value)
-              : 'https://api.anthropic.com'
+      newProvider.platform === 'jev'
+        ? 'https://api.typesafe.ai'
+        : newProvider.platform === 'openai'
+          ? 'https://api.openai.com'
+          : newProvider.platform === 'gemini'
+            ? 'https://generativelanguage.googleapis.com'
+            : newProvider.platform === 'grok'
+              ? 'https://api.x.ai/v1'
+              : newProvider.platform === 'kimi' ||
+                  newProvider.platform === 'zhipu' ||
+                  newProvider.platform === 'deepseek'
+                ? defaultCNBaseUrl(newProvider.platform, editProviderMode.value, editApiProtocol.value)
+                : 'https://api.anthropic.com'
     editBaseUrl.value = isCNApiKeyProvider.value && editApiProtocol.value === 'adaptive'
       ? editAdaptiveBaseUrls.value.chat_completions
       : (credentials.base_url as string) || platformDefaultUrl

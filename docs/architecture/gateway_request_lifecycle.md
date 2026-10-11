@@ -71,7 +71,7 @@
 - 客户端协议准入使用普通 Key 绑定的分组，或者复合 Key 最终选中的分组。被拒绝的请求在协议 handler、提供商选择和计费之前就结束。
 - 等待用户并发槽的过程中，余额、订阅或额度可能变化，所以拿到用户槽后要通过 BillingCache 再检查一次权益。
 - 模型权限、分组白名单和提供商资格，都用逐层解析后对应那一层的模型名判断；客户端别名和最终路由模型是两个不同的名字。
-- 统一文本入口在提供商确定后检查计费模型是否有价格，Responses WebSocket 每轮执行相同检查。缺价时返回本地错误，手动零价可以放行；适用范围和配置方式见[缺价处理](../domains/routing_and_billing.md#missing_model_pricing)。
+- 统一文本入口和 Gemini 的生成动作在提供商确定后检查计费模型是否有价格，每次换号都重新检查。Responses WebSocket 每轮执行相同检查。缺价时返回本地错误，手动零价可以放行；适用范围和配置方式见[缺价处理](../domains/routing_and_billing.md#missing_model_pricing)。
 - 上游成功后才增加 RPM 软计数，并安排正常的用量结算。本地拦截、内容拒绝和上游失败分别写各自的审计和运维记录。
 - HTTP 200 里出现的失败事件，按事件表达的实际状态执行提供商策略。WS 桥已经执行过的副作用，通过本请求的 `ResponseFailureEffects` 交给输出端，输出端只处理一次。HTTP 提交、重试窗口和实际输出三者分开记录。
 - 响应里的模型别名恢复只修改协议的元数据字段，正文里恰好相同的字符串保持原样。工具恢复状态由 `requeststate.ResponseTools` 按请求和 turn 持有，WS 会话更新时，还在输出的 turn 保持自己的状态。协议算法在 `protocol/bridge`，HTTP 输出适配在 `gateway/httpapi`。
@@ -273,6 +273,12 @@ Brave 和 Tavily 搜索由 search 选择供应商并预占额度。失败时释�
 `gateway/searchtools` 负责工具识别、提供商和分组的启用裁决、协议事件和合成 usage。app 通过 gateway/provider 绑定同一个 `search.ConfigService`、Registry 和分组策略读取实例，配置更换时发布到这个注册表。重试和完成处理由请求编排负责。Grok 原生搜索和 OpenAI AlphaSearch 由对应的 upstream 处理。资金是否提交以资金事务为准，通知成功、搜索配额和审核记录都不能作为证明。
 
 独立的 Web 和 X 搜索由 app 直接构造 `gateway/httpapi.SearchHandler` 和固定的 `SearchPorts`。HTTP 按解析、认证、资金、审核、选号的顺序执行；平台报文和单次交换由 `gateway/provider` 组合 Grok 的底层调用和共享传输完成。选择接口只返回当前请求的受控目标，完成前同步取得提供商快照，异步记录读取快照，Gin Context 留在请求内。相同查询的每次调用都生成独立的资金请求 ID，完成快照提交后才释放提供商资源。
+
+## SystemOne 决策请求
+
+`POST /v1/systemone` 使用共同鉴权和模型映射，`gateway/systemone` 管理同步请求的提供商尝试。每次尝试经过资金复查和价格预检，`upstream/jev` 完成单次交换。答案有效时按用量状态提交完成记录或用量告警，捕获完成快照后释放提供商槽。请求格式与告警规则见 [Jev 与 SystemOne](../interfaces/jev_upstream.md)。
+
+SystemOne 执行器由 app 独立构造，注入传输、地址策略、价格检查、响应头过滤和通用提供商健康组件。复合 Key 的端点识别和错误输出按 SystemOne 处理。429、529 的 Retry-After 由 Jev 解析器解释，通用健康组件按提供商配置应用冷却。
 
 ## 新增入口检查清单
 

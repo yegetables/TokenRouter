@@ -275,6 +275,7 @@ import { getPersistedPageSize } from '@/composables/usePersistedPageSize'
 import { formatReasoningEffortMapping } from '@/utils/format'
 import { getBillingModeLabel, getDisplayBillingMode as resolveDisplayBillingMode } from '@/utils/billingMode'
 import { resolveUsageRequestType, requestTypeToLegacyStream } from '@/utils/usageRequestType'
+import { calculateUsageTps } from '@/utils/usageTps'
 import type {
   EndpointStat,
   GroupStat,
@@ -740,6 +741,7 @@ const exportToCSV = async () => {
       t('usage.original'),
       t('usage.firstToken'),
       t('usage.duration'),
+      t('usage.tpsExport'),
     ]
     const rows = allLogs.map((log) => [
       log.created_at,
@@ -759,6 +761,7 @@ const exportToCSV = async () => {
       log.total_cost.toFixed(8),
       log.first_token_ms ?? '',
       log.duration_ms ?? '',
+      calculateUsageTps(log)?.toFixed(1) ?? '',
     ].map(escapeCSVValue))
     const csvContent = [
       headers.map(escapeCSVValue).join(','),
@@ -797,6 +800,7 @@ const allColumns = computed<Column[]>(() => [
   { key: 'tokens', label: t('usage.tokens'), sortable: false },
   { key: 'cost', label: t('usage.cost'), sortable: false },
   { key: 'latency', label: t('usage.latency'), sortable: false },
+  { key: 'tps', label: t('usage.tps'), sortable: false },
   { key: 'created_at', label: t('usage.time'), sortable: true },
   { key: 'request_id', label: t('requests.id'), sortable: false },
   { key: 'user_agent', label: t('usage.userAgent'), sortable: false },
@@ -893,7 +897,7 @@ const loadFilterOptions = async () => {
   try {
     const [personalKeys, availableGroups] = await Promise.all([
       keysAPI.list(1, 100, { scope: 'personal' }),
-      userGroupsAPI.getAvailable(),
+      userGroupsAPI.getAvailable('personal', undefined, false),
     ])
     let teamKeys: TeamAPIKey[] = []
     try {

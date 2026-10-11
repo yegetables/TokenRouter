@@ -65,16 +65,18 @@ const (
 	PlatformKimi        = capability.PlatformKimi
 	PlatformZhipu       = capability.PlatformZhipu
 	PlatformDeepseek    = capability.PlatformDeepseek
+	PlatformJev         = capability.PlatformJev
 
 	// 提供商接入模式（国产供应商）：按量付费 vs Coding Plan。
 	ProviderModePayG   = "payg"
 	ProviderModeCoding = "coding"
 
-	// 上游 API 协议（国产供应商）：决定转发端点与格式，与接入模式正交。
+	// API 协议名称用于凭据兼容字段和管理端测试。
 	APIProtocolChatCompletions = "chat_completions"
 	APIProtocolAnthropic       = "anthropic"
 	APIProtocolResponses       = "responses"
 	APIProtocolAdaptive        = "adaptive"
+	APIProtocolSystemOne       = string(capability.ProtocolSystemOne)
 
 	// 国产 OpenAI 兼容供应商各模式的默认 base_url。
 	// 与前端 credentialsBuilder.ts 中的预设保持一致。
@@ -83,6 +85,7 @@ const (
 	DefaultZhipuPayGBaseURL   = "https://open.bigmodel.cn/api/paas/v4"
 	DefaultZhipuCodingBaseURL = "https://open.bigmodel.cn/api/coding/paas/v4"
 	DefaultDeepseekBaseURL    = "https://api.deepseek.com"
+	DefaultJevBaseURL         = "https://api.typesafe.ai"
 
 	// 国产供应商 Anthropic 协议端点的默认 base_url（上游路径为 {base}/v1/messages）。
 	// 与前端 credentialsBuilder.ts 中的预设保持一致。
@@ -645,7 +648,11 @@ func ExtractExplicitFinalModelWhitelist(rawWhitelist any) map[string]struct{} {
 			if raw == nil {
 				continue
 			}
-			values = append(values, strings.TrimSpace(fmt.Sprint(raw)))
+			if model, ok := raw.(string); ok {
+				values = append(values, strings.TrimSpace(model))
+			} else {
+				values = append(values, strings.TrimSpace(fmt.Sprint(raw)))
+			}
 		}
 	default:
 		return nil

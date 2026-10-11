@@ -410,6 +410,11 @@ func AbortCompositeKeyError(c *gin.Context, err error) {
 	status := httpx.ErrorCode(err)
 	code := infraerrors.Reason(err)
 	message := infraerrors.Message(err)
+	if IsSystemOneEndpoint(c.Request.URL.Path) {
+		WriteSystemOneError(c, status, "invalid_request_error", code, "model", message)
+		c.Abort()
+		return
+	}
 	if IsOpenAICompositeEndpoint(c.Request.URL.Path) {
 		c.JSON(status, gin.H{"error": gin.H{
 			"message": message, "type": "invalid_request_error", "param": "model", "code": code,

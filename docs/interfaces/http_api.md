@@ -210,7 +210,7 @@ Ollama Cloud 的设置、状态、会话、自动刷新和主动刷新路由绑�
 
 创建和更新 API Key 时，`quota`、`rate_limit_5h`、`rate_limit_1d`、`rate_limit_7d` 要求是有限的、非负的、小于 `1e12` 的 USD 数值，以适配数据库的 `DECIMAL(20,8)`；`0` 表示不限额。创建时省略 `expires_in_days` 表示永不过期，提供时要大于 0；更新时用空的 `expires_at` 清除到期时间，用合法的 RFC3339 时间设置到期点。handler 的早期校验和 service 的最终校验使用同一套规则，内部调用同样要经过校验。
 
-`GET /api/v1/keys/billing-options?scope=personal|team` 返回当前作用域下可以指定的有效订阅摘要，包括 `id`、`plan_id`、`plan_name`、`expires_at`、`groups_restricted` 和 `applicable_groups`。`GET /api/v1/groups/available?scope=personal|team&subscription_id={id}` 带 `subscription_id` 时，返回付款主体已有的分组权限和这个订阅套餐分组的交集；不带时返回普通的可用分组列表。两个接口在团队作用域下都不会返回成员自己的订阅。可见分组的 `models` 和 `model_protocols` 来自组内可以请求的能力，供客户端配置时选择实际的模型；它们只用于展示，权限仍以分组策略为准。
+`GET /api/v1/keys/billing-options?scope=personal|team` 返回当前作用域下可以指定的有效订阅摘要，包括 `id`、`plan_id`、`plan_name`、`expires_at`、`groups_restricted` 和 `applicable_groups`。`GET /api/v1/groups/available?scope=personal|team&subscription_id={id}` 带 `subscription_id` 时，返回付款主体已有的分组权限和这个订阅套餐分组的交集；不带时返回普通的可用分组列表。两个接口在团队作用域下都不会返回成员自己的订阅。可见分组的 `models` 和 `model_protocols` 来自有限模型目录，供客户端配置时选择型号，权限由请求时的分组策略校验。`include_models` 默认为 `true`；传 `false` 时保留作用域、套餐和分组权限过滤，跳过模型、协议和模型属性计算。使用记录及仪表盘的筛选项使用轻量查询，Key 配置导出使用完整查询。非法的 `include_models` 值返回 400。
 
 网关的 `GET /v1/usage` 除了 Key 配额、订阅或余额字段，总是返回一个 `billing` 对象，至少包含 `mode`、`source`、`preferred_subscription_id`、`available` 和 `unit`：
 
@@ -375,3 +375,7 @@ Grok 请求缓存开关使用 `X-TokenRouter-Grok-Client-Tool-Cache`，没有新
 浏览器的语言设置和登录协议确认使用 `tokenrouter_` 开头的存储键；新键没有值时，复制旧键的值，协议仍然按 revision 判断。新键已经有值或撤回记录时，以新键为准；可以重建的缓存使用新名称，旧缓存留在浏览器里，等它自然失效。
 
 相关文档：[上游提供商能力矩阵](upstream_provider_matrix.md)、[网关错误响应策略](gateway_error_policy.md)、[身份与租户](../domains/identity_and_tenancy.md)、[网关请求生命周期](../architecture/gateway_request_lifecycle.md)、[支付与权益](../domains/payments_and_entitlements.md)、[接口目录](index.md)。
+
+## SystemOne
+
+`POST /v1/systemone` 使用网关 API Key 认证，支持普通 Key 和复合 Key。分组开放 `systemone` 后，调度到已启用该协议的 Jev API Key 提供商。请求字段、成功响应和用量异常处理见 [Jev 与 SystemOne](jev_upstream.md)。

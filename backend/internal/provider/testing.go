@@ -24,7 +24,9 @@ const (
 	TestRouteGrok
 	TestRouteAntigravity
 	TestRouteQoder
+	TestRouteJev
 
+	ProviderTestTypeDecision      = "decision"
 	ProviderTestTypeText          = "text"
 	ProviderTestTypeImage         = "image"
 	ProviderTestModeDefault       = "default"
@@ -48,6 +50,9 @@ type TestEvent struct {
 
 // TestRequest 表达测试意图；Type 为 nil 时保留历史模型名推断，客户端元数据不包含凭据。
 type TestRequest struct {
+	// SystemOne 保存本次决策测试的 state 和 questions。
+	SystemOne json.RawMessage
+
 	ProviderID            int64
 	Model, Prompt, Mode   string
 	Type                  *string
@@ -110,6 +115,8 @@ type testResultSink struct {
 // NormalizeProviderTestType 统一管理端传入的测试类型，空值由调用方按兼容方式处理。
 func NormalizeProviderTestType(testType string) string {
 	switch strings.ToLower(strings.TrimSpace(testType)) {
+	case ProviderTestTypeDecision:
+		return ProviderTestTypeDecision
 	case ProviderTestTypeImage:
 		return ProviderTestTypeImage
 	case ProviderTestTypeText:
@@ -120,7 +127,7 @@ func NormalizeProviderTestType(testType string) string {
 }
 
 // ProviderTestTypeFromArgs 返回类型以及是否由调用方明确指定。
-// 省略类型时按模型名判断，管理端请求传入 text 或 image。
+// 省略类型时按模型名判断，管理端请求传入 text、image 或 decision。
 func ProviderTestTypeFromArgs(testTypes ...string) (string, bool) {
 	if len(testTypes) == 0 || strings.TrimSpace(testTypes[0]) == "" {
 		return ProviderTestTypeText, false
@@ -196,6 +203,9 @@ func (s *TestService) execute(ctx context.Context, request TestRequest, sink Tes
 		return s.fail(ctx, sink, "Provider not found")
 	}
 	info := target.Information()
+	if (kind == ProviderTestTypeDecision || len(request.SystemOne) > 0) && info.Platform != PlatformJev {
+		return s.fail(ctx, sink, "Decision tests require a Jev provider")
+	}
 	if explicit && kind == ProviderTestTypeImage && info.Platform != PlatformOpenAI && info.Platform != PlatformGemini && info.Platform != PlatformGrok {
 		return s.fail(ctx, sink, fmt.Sprintf("Image tests are not supported for platform %s", info.Platform))
 	}
@@ -224,6 +234,8 @@ func (s *TestService) execute(ctx context.Context, request TestRequest, sink Tes
 		prepared.Route = TestRouteGrok
 	case PlatformAntigravity:
 		prepared.Route = TestRouteAntigravity
+	case PlatformJev:
+		prepared.Route = TestRouteJev
 	case PlatformQoder:
 		prepared.Route = TestRouteQoder
 	default:
@@ -235,6 +247,8 @@ func (s *TestService) execute(ctx context.Context, request TestRequest, sink Tes
 // TestProtocolID 把管理端传入的测试协议转换为原生协议 ID，未知值返回空字符串。
 func TestProtocolID(protocol string) capability.ProtocolID {
 	switch protocol {
+	case APIProtocolSystemOne:
+		return capability.ProtocolSystemOne
 	case APIProtocolAnthropic:
 		return capability.ProtocolAnthropicMessages
 	case APIProtocolResponses:
@@ -246,14 +260,16 @@ func TestProtocolID(protocol string) capability.ProtocolID {
 	}
 }
 
-// testProtocolAllowed 判断本次文字测试能否直连所选协议。
+// testProtocolAllowed 判断本次测试能否直连所选协议。
 // OpenAI API Key 可在 Responses 与 Chat 之间任选，OAuth 只有 Responses；
 // 国产平台可测试已启用的协议，其他平台使用各自固定的测试端点。
 func testProtocolAllowed(info TestTargetInfo, protocol string) bool {
 	switch info.Platform {
+	case PlatformJev:
+		return protocol == APIProtocolSystemOne && slices.Contains(info.EnabledProtocols, capability.ProtocolSystemOne)
 	case PlatformOpenAI:
 		if info.Type == ProviderTypeAPIKey {
-			return protocol != APIProtocolAnthropic
+			return protocol == APIProtocolResponses || protocol == APIProtocolChatCompletions
 		}
 		return protocol == APIProtocolResponses
 	case PlatformKimi, PlatformZhipu, PlatformDeepseek:

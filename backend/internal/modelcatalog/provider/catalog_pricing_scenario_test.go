@@ -770,7 +770,7 @@ func TestSupplementRulesPublishAtomically(t *testing.T) {
 
 // TestShippedSupplementsAreMinimalAndDocumented 验证分发数据没有混入旧展示字段。
 func TestShippedSupplementsAreMinimalAndDocumented(t *testing.T) {
-	body := modelcatalog.PricingSupplements()
+	body := modelcatalog.Supplements()
 	var records map[string]map[string]json.RawMessage
 	require.NoError(t, json.Unmarshal(body, &records))
 	for model, fields := range records {
@@ -803,4 +803,61 @@ func TestModelRulesReturnIndependentValues(t *testing.T) {
 	require.Equal(t, 2.0, second.TimePricing.Periods[0].Multiplier)
 	require.InDelta(t, 1.25e-6, second.CacheCreation5mPrice, 1e-12)
 	require.InDelta(t, 2e-6, second.CacheCreation1hPrice, 1e-12)
+}
+
+// TestJevOfflineCatalogPricesKeepProviderIdentity 检查 TypeSafe 直连与渠道免费型号各自查价。
+func TestJevOfflineCatalogPricesKeepProviderIdentity(t *testing.T) {
+	service := newOfflinePricingFixture(t)
+	for _, model := range []string{"jev-latest", "jev-preview", "jev-1.13.0"} {
+		p := service.GetModelPricing(model)
+		require.NotNil(t, p, model)
+		require.InDelta(t, 4.2e-8, p.InputCostPerToken, 1e-15)
+		require.Zero(t, p.OutputCostPerToken)
+		require.Zero(t, p.CacheReadInputTokenCost)
+		require.Equal(t, "local_supplement", p.PriceSources["input"])
+		attributes := service.ModelAttributes(model)
+		require.NotNil(t, attributes.InputModalities)
+		require.NotNil(t, attributes.OutputModalities)
+		require.Equal(t, []string{"text"}, *attributes.InputModalities)
+		require.Equal(t, []string{"text"}, *attributes.OutputModalities)
+	}
+	free := service.GetModelPricing("opencode/jev-1.13-free")
+	require.NotNil(t, free)
+	require.Zero(t, free.InputCostPerToken)
+	require.Zero(t, free.OutputCostPerToken)
+	attributes := service.ModelAttributes("jev-latest")
+	require.NotNil(t, attributes.DisplayName)
+	require.Equal(t, "Jev", *attributes.DisplayName)
+	require.Equal(t, 64000, *attributes.Context)
+	require.Nil(t, service.GetModelPricing("jev-unknown-version"))
+}
+
+// TestJevCatalogPricesOverrideSupplement 检查原厂目录报价和零价优先，渠道报价各自生效。
+func TestJevCatalogPricesOverrideSupplement(t *testing.T) {
+	remote := &catalogRemoteFixture{body: []byte(`{"providers":{"typesafe":{"models":{"jev-latest":{"cost":{"input":0.084,"output":0}},"jev-preview":{"cost":{"input":0,"output":0}}}},"relay":{"models":{"jev-preview":{"cost":{"input":5,"output":2}}}}}}`)}
+	service := NewService(Options{DataDir: t.TempDir(), RemoteURL: "https://models.dev/catalog.json?type=all"}, remote)
+	require.NoError(t, service.ForceUpdate())
+	require.InDelta(t, 8.4e-8, service.GetModelPricing("jev-latest").InputCostPerToken, 1e-15)
+	require.Equal(t, "models.dev", service.GetModelPricing("jev-latest").Source)
+	require.NotContains(t, service.GetModelPricing("jev-latest").PriceSources, "input")
+	require.Zero(t, service.GetModelPricing("jev-preview").InputCostPerToken)
+	require.InDelta(t, 5e-6, service.GetModelPricing("relay/jev-preview").InputCostPerToken, 1e-15)
+}
+
+// TestUnifiedModelSupplementPublishesPriceAndAttributes 检查同一补充文件的属性和价格一起发布，坏属性拒绝整次更新。
+func TestUnifiedModelSupplementPublishesPriceAndAttributes(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "models.json")
+	require.NoError(t, os.WriteFile(path, []byte(`{"jev-preview":{"provider":"typesafe","input_cost_per_token":0.0000001,"output_cost_per_token":0,"attributes":{"display_name":"Custom preview","context":128000,"input_modalities":["text"]}}}`), 0o600))
+	service := NewService(Options{DataDir: t.TempDir(), FallbackFile: path}, nil)
+	require.NoError(t, service.Initialize())
+	defer service.Stop()
+	require.InDelta(t, 1e-7, service.GetModelPricing("jev-preview").InputCostPerToken, 1e-15)
+	attrs := service.ModelAttributes("jev-preview")
+	require.Equal(t, "Custom preview", *attrs.DisplayName)
+	require.Equal(t, 128000, *attrs.Context)
+	require.Equal(t, []string{"text"}, *attrs.OutputModalities)
+	require.NoError(t, os.WriteFile(path, []byte(`{"jev-preview":{"input_cost_per_token":2,"attributes":{"input_modalities":["invalid"]}}}`), 0o600))
+	require.Error(t, service.ForceUpdate())
+	require.InDelta(t, 1e-7, service.GetModelPricing("jev-preview").InputCostPerToken, 1e-15)
+	require.Equal(t, "Custom preview", *service.ModelAttributes("jev-preview").DisplayName)
 }

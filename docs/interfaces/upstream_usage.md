@@ -14,7 +14,7 @@
 }
 ```
 
-普通 API Key 提供商没有这个对象时，按 `enabled=true`、`adapter=sub2api` 处理，根地址使用提供商现有的 API Base URL。只有明确写 `enabled=false` 才关闭查询。管理员可以选择的 `adapter` 有 `sub2api`、`new_api`、`zivv`、`zcode`、`cline` 和 `cline_pass`；Kimi、Zhipu、DeepSeek 忽略这个字段，按平台和 `provider_mode` 选择固定的内置适配器。`base_url` 只能覆盖查询的根地址，不能带用户信息、查询串或片段。后端照常执行 HTTPS、allowlist、私网地址和 URL 格式的校验。
+普通 API Key 提供商没有这个对象时，按 `enabled=true`、`adapter=sub2api` 处理，根地址使用提供商现有的 API Base URL。Jev 缺少这个对象时默认关闭查询，管理员可配置兼容中继的查询适配器。其他 API Key 提供商通过 `enabled=false` 关闭查询。管理员可以选择的 `adapter` 有 `sub2api`、`new_api`、`zivv`、`zcode`、`cline` 和 `cline_pass`；Kimi、Zhipu、DeepSeek 忽略这个字段，按平台和 `provider_mode` 选择固定的内置适配器。`base_url` 只能覆盖查询的根地址，不能带用户信息、查询串或片段。后端照常执行 HTTPS、allowlist、私网地址和 URL 格式的校验。
 
 API Key 始终从提供商的 `credentials` 读取，不会出现在 `extra`、接口响应、审计请求体、浏览器缓存和日志里。用户也无法配置任意的路径、方法、Header 模板或脚本。
 
@@ -102,7 +102,7 @@ Ollama 的固定设置页抓取、HTML 解析、Retry-After、Chat 思考字段�
 
 API Key 提供商（包括 Kimi、Zhipu、DeepSeek）的用量栏，按以下顺序展示：上游余额或周期用量、本地今日统计、本地配额、查询按钮。本地统计和配额只在有数据或有配置时显示；上游查询失败、关闭或不支持时，本地数据照常显示。内容组件隐藏自己内部的查询按钮，用量栏底部提供唯一的查询入口，查询中禁用，失败后用同一个按钮重试。
 
-展示、按钮、列表的单个和批量查询使用同一套资格判断：只支持 API Key；Zhipu 非 coding 模式没有余额端点；`extra.upstream_usage_query.enabled=false` 时关闭；没有配置时默认启用。不支持或已关闭时，显示对应的提示并隐藏按钮；批量选择时跳过这些提供商，不计为查询失败。
+展示、按钮、列表的单个和批量查询使用同一套资格判断。查询支持 API Key，Zhipu 非 coding 模式没有余额端点。`extra.upstream_usage_query.enabled=false` 时关闭查询。没有配置时 Jev 默认关闭，其他支持查询的提供商默认启用。不支持或已关闭时，上游查询区域隐藏，本地统计和配额照常显示。批量选择时跳过这些提供商。
 
 列表加载、滚动进入视口和自动刷新都不会请求上游，管理员只能通过行内的刷新按钮或批量操作手动查询。成功的结果按管理员身份、提供商 ID、`updated_at`、代理和 Base URL、适配器和规范化后的配置，写进 `sessionStorage`，保存五分钟；失败的结果不缓存。强制刷新会绕过缓存；保存提供商，或者凭据、代理、Base URL、配置变化时，缓存立即失效。缓存里只有归一化后的结果，没有任何凭据。提供商有有效的 `extra.cn_usage_monitor_snapshot` 时，列表可以直接展示最近一次监控的结果，不发起请求。
 
