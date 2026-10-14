@@ -61,8 +61,11 @@ ARG TARGETARCH
 ENV GOPROXY=${GOPROXY}
 ENV GOSUMDB=${GOSUMDB}
 
-# Install build dependencies
-RUN apk add --no-cache git ca-certificates tzdata
+# Install build dependencies.
+# dl-cdn.alpinelinux.org fails its TLS handshake on some networks, so apk reads
+# the Tsinghua mirror instead.
+RUN sed -i 's#https://dl-cdn.alpinelinux.org#https://mirrors.tuna.tsinghua.edu.cn#g' /etc/apk/repositories \
+    && apk add --no-cache git ca-certificates tzdata
 
 WORKDIR /app/backend
 
@@ -74,6 +77,10 @@ RUN --mount=type=cache,id=tokenrouter-gomod,target=/go/pkg/mod \
 
 # 先复制后端源码
 COPY backend/ ./
+
+# Files cloned onto fnOS volumes can carry 0000 permission bits; restore them
+# before the build runs the version script.
+RUN chmod 755 ./scripts/*.sh
 
 # 再复制前端构建产物，避免被后端源码覆盖
 COPY --from=frontend-builder /app/backend/internal/web/dist ./internal/web/dist
@@ -107,8 +114,10 @@ LABEL maintainer="Wei-Shaw <github.com/Wei-Shaw>"
 LABEL description="TokenRouter - AI API Gateway Platform"
 LABEL org.opencontainers.image.source="https://github.com/TokenFlux/TokenRouter"
 
-# Install runtime dependencies
-RUN apk add --no-cache \
+# Install runtime dependencies.
+# Same TLS handshake problem as the builder stage; use the Tsinghua mirror.
+RUN sed -i 's#https://dl-cdn.alpinelinux.org#https://mirrors.tuna.tsinghua.edu.cn#g' /etc/apk/repositories \
+    && apk add --no-cache \
     ca-certificates \
     tzdata \
     su-exec \
@@ -141,7 +150,9 @@ RUN mkdir -p /app/data && chown tokenrouter:tokenrouter /app/data
 
 # Copy entrypoint script (fixes volume permissions then drops to tokenrouter)
 COPY deploy/docker-entrypoint.sh /app/docker-entrypoint.sh
-RUN chmod +x /app/docker-entrypoint.sh
+# Set 755 explicitly. A file cloned onto an fnOS volume can carry 0000 bits, and
+# chmod +x alone leaves 0111, which the interpreter cannot read.
+RUN chmod 755 /app/docker-entrypoint.sh
 
 # Expose port (can be overridden by SERVER_PORT env var)
 EXPOSE 8080
