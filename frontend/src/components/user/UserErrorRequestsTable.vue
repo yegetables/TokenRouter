@@ -114,6 +114,7 @@
         :page="page"
         :page-size="pageSize"
         :total="total"
+        show-jump
         @update:page="$emit('update:page', $event)"
         @update:pageSize="$emit('update:pageSize', $event)"
       />

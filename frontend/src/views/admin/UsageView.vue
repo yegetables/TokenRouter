@@ -149,7 +149,7 @@
           @sort="handleSort"
           @userClick="handleUserClick"
         />
-        <Pagination v-if="pagination.total > 0" :page="pagination.page" :total="pagination.total" :page-size="pagination.page_size" @update:page="handlePageChange" @update:pageSize="handlePageSizeChange" />
+        <Pagination v-if="pagination.total > 0" :page="pagination.page" :total="pagination.total" :page-size="pagination.page_size" show-jump @update:page="handlePageChange" @update:pageSize="handlePageSizeChange" />
       </div>
 
       <div v-show="activeTab === 'errors'" v-content-reveal="activeTab === 'errors'" data-testid="admin-usage-errors-section">
@@ -425,8 +425,10 @@ const buildUsageListParams = (
 const loadLogs = async () => {
   abortController?.abort(); const c = new AbortController(); abortController = c; loading.value = true
   try {
+    // Ask for the exact total: fast pagination skips the COUNT and reports the
+    // total as "page size + 1", so the pager would always show two pages.
     const res = await adminAPI.usage.list(
-      buildUsageListParams(pagination.page, pagination.page_size, false),
+      buildUsageListParams(pagination.page, pagination.page_size, true),
       { signal: c.signal }
     )
     if(!c.signal.aborted) { usageLogs.value = res.items; pagination.total = res.total }
