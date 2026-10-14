@@ -17,6 +17,9 @@ const (
 	UpstreamUsageAdapterZhipuCoding     = usageview.UpstreamUsageAdapterZhipuCoding     // Zhipu coding percentage format
 	UpstreamUsageAdapterKimiBalance     = usageview.UpstreamUsageAdapterKimiBalance     // Kimi wallet balance format
 	UpstreamUsageAdapterDeepseekBalance = usageview.UpstreamUsageAdapterDeepseekBalance // DeepSeek multicurrency balance format
+	UpstreamUsageAdapterZCode           = usageview.UpstreamUsageAdapterZCode           // ZCode Start Plan usage format
+	UpstreamUsageAdapterCline           = usageview.UpstreamUsageAdapterCline           // Cline usage-billing format
+	UpstreamUsageAdapterClinePass       = usageview.UpstreamUsageAdapterClinePass       // ClinePass wallet format
 	// Wallet credential keys supply optional New API user authentication when
 	// an API Key cannot read its wallet balance.
 	NewAPIUserAccessTokenCredentialKey = "new_api_user_access_token" // wallet access token key
@@ -34,6 +37,9 @@ var usageAdapterCatalog = []UsageAdapterSpec{
 	{Name: UpstreamUsageAdapterZhipuCoding, Label: "Zhipu Coding Plan", Automatic: true},
 	{Name: UpstreamUsageAdapterKimiBalance, Label: "Kimi Balance", Automatic: true},
 	{Name: UpstreamUsageAdapterDeepseekBalance, Label: "DeepSeek Balance", Automatic: true},
+	{Name: UpstreamUsageAdapterZCode, Label: "ZCode Start Plan", Automatic: false},
+	{Name: UpstreamUsageAdapterCline, Label: "Cline", Automatic: false},
+	{Name: UpstreamUsageAdapterClinePass, Label: "ClinePass", Automatic: false},
 }
 
 // UsageAdapterSpec names a usage format and its selection category.

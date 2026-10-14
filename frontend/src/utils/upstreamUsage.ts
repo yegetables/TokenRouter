@@ -1,6 +1,13 @@
-import type { Provider } from '@/types'
+import type { Provider, UpstreamUsageAdapter } from '@/types'
 
 type UpstreamUsageProvider = Pick<Provider, 'type' | 'platform' | 'credentials' | 'extra'>
+
+// 与后端 usageAdapterCatalog 中可手动选择的适配器对齐；回显与加载共用这份名单。
+const UPSTREAM_USAGE_ADAPTERS: readonly string[] = ['sub2api', 'new_api', 'zivv', 'zcode', 'cline', 'cline_pass']
+
+export function isUpstreamUsageAdapter(value: unknown): value is UpstreamUsageAdapter {
+  return typeof value === 'string' && UPSTREAM_USAGE_ADAPTERS.includes(value)
+}
 
 /** 上游用量只支持 API Key；智谱按量付费没有公开余额端点。 */
 // @project-doc docs/interfaces/upstream_usage.md#frontend_lifecycle

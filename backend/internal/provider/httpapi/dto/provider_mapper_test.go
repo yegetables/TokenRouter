@@ -157,6 +157,26 @@ func TestProviderFromServiceShallow_PreservesZivvAdapterSelection(t *testing.T) 
 	}, got.Extra[provider.UpstreamUsageQueryExtraKey])
 }
 
+// TestProviderFromServiceShallow_EchoesRegisteredUpstreamUsageAdapters maps a
+// record whose usage adapter names each catalog option. It checks that a
+// recognized adapter name survives the shallow DTO unchanged, so a new catalog
+// entry is echoed without another edit here.
+func TestProviderFromServiceShallow_EchoesRegisteredUpstreamUsageAdapters(t *testing.T) {
+	for _, option := range provider.UpstreamUsageAdapterOptions() {
+		src := &provider.Record{
+			Now: time.Now, LoadLocation: time.LoadLocation,
+			ID: 11, Type: capability.ProviderTypeAPIKey,
+			Extra: map[string]any{provider.UpstreamUsageQueryExtraKey: map[string]any{
+				"enabled": true, "adapter": option.Name,
+			}},
+		}
+		got := ProviderFromRecordShallow(src)
+		require.Equal(t, map[string]any{
+			"enabled": true, "adapter": option.Name,
+		}, got.Extra[provider.UpstreamUsageQueryExtraKey], "adapter %s should be echoed unchanged", option.Name)
+	}
+}
+
 // TestProviderFromServiceShallow_NilCredentialsOmitsStatus maps an OAuth record
 // whose credential map is absent. The resulting DTO keeps both credentials and
 // sensitive-presence status nil, preserving the missing-input representation.

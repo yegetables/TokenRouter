@@ -20,6 +20,9 @@ const (
 	UpstreamUsageAdapterZhipuCoding     = "zhipu_coding"     // Zhipu coding percentage adapter
 	UpstreamUsageAdapterKimiBalance     = "kimi_balance"     // Kimi wallet balance adapter
 	UpstreamUsageAdapterDeepseekBalance = "deepseek_balance" // DeepSeek multicurrency balance adapter
+	UpstreamUsageAdapterZCode           = "zcode"            // ZCode Start Plan adapter
+	UpstreamUsageAdapterCline           = "cline"            // Cline usage-billing adapter
+	UpstreamUsageAdapterClinePass       = "cline_pass"       // ClinePass wallet adapter
 )
 
 // UpstreamUsageAmount holds independently optional amounts reported in the
