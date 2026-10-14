@@ -312,6 +312,10 @@ const handleEnter = () => {
   if (!isComposing.value) addCustom()
 }
 
+// 白名单按已选顺序保存，覆盖同步只在顺序与内容都一致时才视为无变化。
+const isSameModelList = (left: string[], right: string[]) =>
+  left.length === right.length && left.every((model, index) => model === right[index])
+
 const syncUpstreamModels = async () => {
   if (isSyncingUpstream.value) return
   if (!props.providerId && !props.syncCredentials) return
@@ -327,27 +331,24 @@ const syncUpstreamModels = async () => {
       return
     }
 
-    const upstreamModels = result.models.map(model => model.trim()).filter(Boolean)
+    const upstreamModels = [...new Set(result.models.map(model => model.trim()).filter(Boolean))]
     if (upstreamModels.length === 0) {
       appStore.showInfo(t('admin.providers.syncUpstreamModelsEmpty'))
       return
     }
 
-    const newModels = [...props.modelValue]
-    let addedCount = 0
-    for (const model of upstreamModels) {
-      if (!newModels.includes(model)) {
-        newModels.push(model)
-        addedCount += 1
-      }
+    if (isSameModelList(props.modelValue, upstreamModels)) {
+      appStore.showInfo(t('admin.providers.syncUpstreamModelsNoChanges', { count: upstreamModels.length }))
+      return
     }
 
-    emit('update:modelValue', newModels)
-    if (addedCount > 0) {
-      appStore.showSuccess(t('admin.providers.syncUpstreamModelsSuccess', { count: addedCount, total: upstreamModels.length }))
-    } else {
-      appStore.showInfo(t('admin.providers.syncUpstreamModelsNoChanges', { count: upstreamModels.length }))
+    // 覆盖会丢掉本地额外添加的型号，先让操作者确认。
+    if (!window.confirm(t('admin.providers.syncUpstreamModelsConfirm', { count: upstreamModels.length }))) {
+      return
     }
+
+    emit('update:modelValue', [...upstreamModels])
+    appStore.showSuccess(t('admin.providers.syncUpstreamModelsSuccess', { count: upstreamModels.length }))
   } catch (error) {
     const message = error instanceof Error ? error.message : t('admin.providers.syncUpstreamModelsFailed')
     appStore.showError(t('admin.providers.syncUpstreamModelsError', { message }))
