@@ -1130,6 +1130,7 @@
       @use="openUseKeyModal"
       @import-tf="openTfCliImportDialog"
       @import="importToCcswitch"
+      @duplicate="duplicateKey"
       @rotate="confirmRotate"
       @delete="confirmDelete"
     />
@@ -2048,6 +2049,14 @@ const openCreateModal = () => {
 
 const editKey = (key: ApiKey) => {
   selectedKey.value = key
+  fillKeyForm(key)
+  formGroups.value = []
+  showEditModal.value = true
+  void Promise.all([loadBillingOptions(), loadFormGroups()])
+}
+
+// fillKeyForm 把一个已有 Key 的配置回填进表单，编辑弹窗和复制配置共用。
+const fillKeyForm = (key: ApiKey) => {
   const hasIPRestriction = (key.ip_whitelist?.length > 0) || (key.ip_blacklist?.length > 0)
   const hasExpiration = !!key.expires_at
   formData.value = {
@@ -2083,8 +2092,24 @@ const editKey = (key: ApiKey) => {
     expiration_date: key.expires_at ? formatDateTimeLocal(key.expires_at) : '',
     fallback_when_group_unavailable: key.fallback_when_group_unavailable ?? false
   }
+}
+
+// duplicateKey 用源 Key 的配置打开创建弹窗，名称追加序号和源 Key 区分，新密钥值由后端生成。
+const duplicateKey = (key: ApiKey) => {
+  selectedKey.value = null
+  fillKeyForm(key)
+  // 序号只对已加载列表去重；分页外的同名 Key 可能漏检，后端创建允许重名，用户可在弹窗里改。
+  const taken = new Set(apiKeys.value.map((item) => item.name))
+  taken.add(key.name)
+  for (let n = 1; ; n++) {
+    const candidate = `${key.name}-${n}`
+    if (!taken.has(candidate)) {
+      formData.value.name = candidate
+      break
+    }
+  }
   formGroups.value = []
-  showEditModal.value = true
+  showCreateModal.value = true
   void Promise.all([loadBillingOptions(), loadFormGroups()])
 }
 
@@ -2124,7 +2149,7 @@ const openKeyActionMenu = (key: ApiKey, event: MouseEvent) => {
   // 固定高菜单(高度随 CCS 导入项显隐):下方放不下即整体上翻;窄屏保持右缘对齐触发器。
   const position = getFloatingPanelPosition(rect, window.innerWidth, window.innerHeight, {
     maxWidth: 192,
-    fixedHeight: publicSettings.value?.hide_ccs_import_button ? 178 : 218,
+    fixedHeight: publicSettings.value?.hide_ccs_import_button ? 214 : 254,
     viewportPadding: 8,
     gap: 4,
     pinLeftOnMobile: false

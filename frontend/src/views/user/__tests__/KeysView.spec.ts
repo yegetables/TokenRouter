@@ -55,6 +55,7 @@ const messages: Record<string, string> = {
   'keys.createKey': 'Create API Key',
   'keys.disable': 'Disable',
   'keys.enable': 'Enable',
+  'keys.duplicateKey': 'Duplicate settings',
   'keys.importToTf': 'Import to TF CLI',
   'keys.apiKeyLimitReached': 'API key limit reached',
   'keys.created': 'Created',
@@ -505,6 +506,106 @@ describe('user KeysView column settings', () => {
     await nextTick()
 
     expect(wrapper.get('[data-test="tf-cli-dialog-stub"]').attributes('data-key-name')).toBe('test-key')
+  })
+
+  it('复制配置用源 Key 的分组、限速和额度打开创建弹窗，新密钥值由后端生成', async () => {
+    listKeys.mockResolvedValueOnce({
+      items: [{
+        ...createApiKey(),
+        group_id: 42,
+        quota: 12.5,
+        concurrency_limit: 4,
+        rpm_limit: 60,
+        rate_limit_5h: 3,
+        rate_limit_1d: 8,
+        rate_limit_7d: 20,
+        fallback_when_group_unavailable: true,
+      }],
+      total: 1,
+      page: 1,
+      page_size: 20,
+      pages: 1,
+    })
+    const wrapper = await mountView()
+
+    await getButtonByText(wrapper, 'More').trigger('click')
+    await getButtonByText(wrapper, 'Duplicate settings').trigger('click')
+    await nextTick()
+
+    // 创建弹窗复用 key-form 表单，名称追加序号和源 Key 区分。
+    expect(wrapper.get('[data-tour="key-form-name"]').element as HTMLInputElement).toHaveProperty('value', 'test-key-1')
+    await wrapper.get('form#key-form').trigger('submit')
+    await flushPromises()
+
+    expect(createKey).toHaveBeenCalledWith(expect.objectContaining({
+      name: 'test-key-1',
+      scope: 'personal',
+      group_id: 42,
+      quota: 12.5,
+      concurrency_limit: 4,
+      rpm_limit: 60,
+      rate_limit_5h: 3,
+      rate_limit_1d: 8,
+      rate_limit_7d: 20,
+      fallback_when_group_unavailable: true,
+    }))
+    expect(updateKey).not.toHaveBeenCalled()
+  })
+
+  it('复制配置保留复合 Key 的分组前缀映射', async () => {
+    listKeys.mockResolvedValueOnce({
+      items: [{
+        ...createApiKey(),
+        is_composite: true,
+        composite_groups: [
+          { group_id: 42, prefix: 'GPT', group: { id: 42, name: 'OpenAI', platform: 'openai' } },
+          { group_id: 43, prefix: 'Claude', group: { id: 43, name: 'Claude', platform: 'anthropic' } },
+        ],
+      }],
+      total: 1,
+      page: 1,
+      page_size: 20,
+      pages: 1,
+    })
+    const wrapper = await mountView()
+
+    await getButtonByText(wrapper, 'More').trigger('click')
+    await getButtonByText(wrapper, 'Duplicate settings').trigger('click')
+    await nextTick()
+
+    expect(wrapper.get('[data-test="composite-group-editor"]').findAll('input')).toHaveLength(2)
+    await wrapper.get('form#key-form').trigger('submit')
+    await flushPromises()
+
+    expect(createKey).toHaveBeenCalledWith(expect.objectContaining({
+      name: 'test-key-1',
+      is_composite: true,
+      composite_groups: [
+        { group_id: 42, prefix: 'GPT' },
+        { group_id: 43, prefix: 'Claude' },
+      ],
+    }))
+  })
+
+  it('复制配置的名称序号跳过已占用的编号', async () => {
+    listKeys.mockResolvedValueOnce({
+      items: [
+        createApiKey(),
+        { ...createApiKey(), id: 2, name: 'test-key-1' },
+      ],
+      total: 2,
+      page: 1,
+      page_size: 20,
+      pages: 1,
+    })
+    const wrapper = await mountView()
+
+    await getButtonByText(wrapper, 'More').trigger('click')
+    await getButtonByText(wrapper, 'Duplicate settings').trigger('click')
+    await nextTick()
+
+    expect(wrapper.get('[data-tour="key-form-name"]').element as HTMLInputElement).toHaveProperty('value', 'test-key-2')
+    wrapper.unmount()
   })
 
   it('轮换先确认，取消时不发送请求', async () => {

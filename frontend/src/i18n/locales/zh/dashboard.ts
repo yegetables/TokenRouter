@@ -93,6 +93,7 @@ export default {
     createKey: '创建密钥',
     editKey: '编辑密钥',
     deleteKey: '删除密钥',
+    duplicateKey: '复制配置',
     rotateKey: '轮换凭据',
     confirmRotate: '确认轮换',
     rotateConfirmMessage: "确定要轮换 '{name}' 的 API Key 凭据吗？旧凭据将失效，使用它的客户端需要更新。Key 的 ID、配置和用量记录保持不变。",

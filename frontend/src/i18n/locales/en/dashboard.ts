@@ -93,6 +93,7 @@ export default {
     createKey: 'Create API Key',
     editKey: 'Edit API Key',
     deleteKey: 'Delete API Key',
+    duplicateKey: 'Duplicate settings',
     rotateKey: 'Rotate credential',
     confirmRotate: 'Confirm rotation',
     rotateConfirmMessage: "Rotate the API key credential for '{name}'? The old credential will stop working, so clients using it must be updated. The key ID, settings, and usage history will stay the same.",
