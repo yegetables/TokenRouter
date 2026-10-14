@@ -183,10 +183,12 @@ func (r *ImageRequest) ValidateRoutingModel(routingModel string) error {
 	return nil
 }
 
-// IsImageGenerationModel recognizes supported GPT-image or Grok-image
-// generation model families.
+// IsImageGenerationModel recognizes models that can serve the image entry
+// points: the native GPT-image and Grok-image families, and third-party image
+// models registered in the model catalogue. Account selection and image
+// billing share this decision through the same underlying check.
 func IsImageGenerationModel(model string) bool {
-	return IsGPTImageGenerationModel(model) || IsGrokImageGenerationModel(model)
+	return upstreamcore.IsImageGenerationModel(model)
 }
 
 // IsGPTImageGenerationModel delegates trimmed, case-insensitive GPT-image

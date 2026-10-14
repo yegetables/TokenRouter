@@ -19,6 +19,13 @@ func MediaForModel(platform, model string) *MediaCapabilities {
 	result := &MediaCapabilities{}
 	switch platform {
 	case "openai":
+		// A registered third-party family reports its own aspect ratios and one
+		// size tier: the tier has no meaning once the request carries a ratio.
+		if registered := OpenAICompatImageModelFor(model); registered != nil {
+			result.ImageSizes = []string{"1K"}
+			result.AspectRatios = append([]string(nil), registered.AspectRatios...)
+			return result
+		}
 		if !slices.Contains([]string{"gpt-image-1", "gpt-image-1-mini", "gpt-image-1.5"}, model) && !strings.HasPrefix(model, "gpt-image-2") {
 			return nil
 		}

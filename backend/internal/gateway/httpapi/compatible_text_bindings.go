@@ -56,7 +56,9 @@ func (p compatibleTextHTTPBackend) ImageContext(ctx context.Context) context.Con
 
 // ChatImageModel recognizes image-generation models after the group's mapping is applied.
 func (p compatibleTextHTTPBackend) ChatImageModel(model string, mapping routing.GroupMappingResult) bool {
-	return media.IsGPTImageGenerationModel(requeststate.GroupMappedModel(model, mapping))
+	// The unified image check also covers registered third-party models, so a
+	// compatible image model is not offered as a chat model.
+	return media.IsImageGenerationModel(requeststate.GroupMappedModel(model, mapping))
 }
 
 // Moderate submits the supplied entry protocol and prepared body to gateway moderation.

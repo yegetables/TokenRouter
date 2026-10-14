@@ -107,6 +107,8 @@ OpenAI 兼容非流式响应的 usage，按 `usage`、`response.usage`、`data.u
 
 推理历史的读取、请求回填和响应缓存，由 `gateway/session.ReasoningHistory` 使用同一个可选的缓存能力完成：保留客户端的 reasoning item ID，TTL 七天，单独的操作预算两秒，读取失败时放行，写入失败时只记日志。这份数据在缓存过期或丢失后无法恢复。
 
+`/v1/images/*` 的模型校验放行原生生图族与名称含 `image` 的 OpenAI 兼容第三方生图模型，与图片计费别名判定同一来源；普通文本模型仍被拒。
+
 <a id="images_url_backfill"></a>
 ### 图片结果回填
 

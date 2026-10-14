@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"mime/multipart"
 	"net/http"
+	"slices"
 	"strings"
 	"time"
 
@@ -182,15 +183,19 @@ func (e *Target) CreativeOpenAIURL(endpoint string) (string, error) { return e.O
 func BuildCreativeOpenAIRequestBody(run creative.CreativeRun, payload creative.CreativeRunPayload, upstreamModel string) ([]byte, string, error) {
 	if run.Operation == creative.CreativeOperationGenerate {
 		bodyMap := map[string]any{
-			"model":         upstreamModel,
-			"prompt":        payload.Prompt,
-			"n":             1,
-			"output_format": "png",
-			"size":          CreativeOpenAIImageSize(run.ImageSize, run.AspectRatio),
+			"model":  upstreamModel,
+			"prompt": payload.Prompt,
+			"n":      1,
+			"size":   CreativeOpenAIRequestImageSize(upstreamModel, run.ImageSize, run.AspectRatio),
 		}
-		// DALL-E selects base64 delivery with its legacy response_format field.
-		// Restrict that field to its model family so GPT Image keeps the PNG
-		// output_format request already constructed above.
+		// output_format is a GPT Image field. A registered third-party endpoint
+		// can reject an unknown field, so only native models receive it.
+		if CreativeOpenAISendsOutputFormat(upstreamModel) {
+			bodyMap["output_format"] = "png"
+		}
+		// DALL-E selects base64 delivery with its legacy response_format field,
+		// and a registered model may need it when its endpoint returns a URL by
+		// default. GPT Image keeps the PNG output_format request above instead.
 		if CreativeOpenAIUsesResponseFormat(upstreamModel) {
 			bodyMap["response_format"] = "b64_json"
 		}
@@ -241,10 +246,12 @@ func BuildCreativeOpenAIRequestBody(run creative.CreativeRun, payload creative.C
 			return nil, "", err
 		}
 	}
-	if err := writer.WriteField("output_format", "png"); err != nil {
-		return nil, "", err
+	if CreativeOpenAISendsOutputFormat(upstreamModel) {
+		if err := writer.WriteField("output_format", "png"); err != nil {
+			return nil, "", err
+		}
 	}
-	if err := writer.WriteField("size", CreativeOpenAIImageSize(run.ImageSize, run.AspectRatio)); err != nil {
+	if err := writer.WriteField("size", CreativeOpenAIRequestImageSize(upstreamModel, run.ImageSize, run.AspectRatio)); err != nil {
 		return nil, "", err
 	}
 	if err := writer.WriteField("n", "1"); err != nil {
@@ -272,8 +279,45 @@ func BuildCreativeOpenAIRequestBody(run creative.CreativeRun, payload creative.C
 // CreativeOpenAIUsesResponseFormat reports whether a trimmed lowercase model
 // begins with dall-e. JSON and multipart builders use that check to send the
 // legacy base64 response_format field for those model names.
+// CreativeOpenAIUsesResponseFormat reports whether the request needs the legacy
+// response_format field for base64 delivery. DALL-E always needs it, and a
+// registered third-party model needs it when its endpoint returns a URL by
+// default.
 func CreativeOpenAIUsesResponseFormat(model string) bool {
-	return strings.HasPrefix(strings.ToLower(strings.TrimSpace(model)), "dall-e")
+	if strings.HasPrefix(strings.ToLower(strings.TrimSpace(model)), "dall-e") {
+		return true
+	}
+	profile := creative.CreativeOpenAICompatImageProfileFor(model)
+	return profile != nil && profile.RequireBase64Response
+}
+
+// CreativeOpenAISendsOutputFormat reports whether the request may carry the GPT
+// Image output_format field. A registered third-party endpoint can reject that
+// field, so it is left off for those models.
+func CreativeOpenAISendsOutputFormat(model string) bool {
+	return !creative.IsCreativeOpenAICompatImageModel(model)
+}
+
+// CreativeOpenAIRequestImageSize returns the size value for an
+// OpenAI-compatible images request. A registered model that encodes size as a
+// ratio receives the requested ratio when the catalogue lists it, else the
+// first registered ratio; every other model receives a WIDTHxHEIGHT pair.
+func CreativeOpenAIRequestImageSize(model, imageSize, aspectRatio string) string {
+	profile := creative.CreativeOpenAICompatImageProfileFor(model)
+	if profile == nil || !profile.SizeAsRatio {
+		return CreativeOpenAIImageSize(imageSize, aspectRatio)
+	}
+	// The creative capability helper exposes the catalogue's ratio list for this
+	// model, so the fallback ratio comes from the same registration.
+	ratios := creative.CreativeCapabilitiesForModel(creative.PlatformOpenAI, model).AspectRatios
+	ratio := strings.TrimSpace(aspectRatio)
+	if slices.Contains(ratios, ratio) {
+		return ratio
+	}
+	if len(ratios) > 0 {
+		return ratios[0]
+	}
+	return "1:1"
 }
 
 // ParseCreativeOpenAIImageOutputs returns the first nonempty decodable base64

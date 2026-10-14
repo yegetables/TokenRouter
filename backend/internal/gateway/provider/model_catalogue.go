@@ -5,6 +5,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/TokenFlux/TokenRouter/internal/gateway/media"
 	"github.com/TokenFlux/TokenRouter/internal/gateway/requeststate"
 	"github.com/TokenFlux/TokenRouter/internal/modelcatalog"
 	"github.com/TokenFlux/TokenRouter/internal/provider"
@@ -70,7 +71,9 @@ func (v catalogueRules) SupportsClientProtocol(model string, source capability.P
 	if embedding || source == capability.ProtocolEmbeddings {
 		return embedding && source == capability.ProtocolEmbeddings
 	}
-	image := upstream.IsGPTImageGenerationModel(model) || upstream.IsGrokImageGenerationModel(model)
+	// The images endpoint, account selection and this catalogue check share one
+	// image-model decision, so a registered third-party model is not dropped here.
+	image := media.IsImageGenerationModel(model)
 	if source == capability.ProtocolImagesGenerations || source == capability.ProtocolImagesEdits {
 		return image
 	}

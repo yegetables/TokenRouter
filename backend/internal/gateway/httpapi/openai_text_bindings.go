@@ -423,7 +423,9 @@ func (p openAITextHTTPBackend) MetadataSession(c *gin.Context, hash, key, model 
 // ChatImageModel rejects image-generation family after applying the supplied
 // group mapping.
 func (p openAITextHTTPBackend) ChatImageModel(model string, mapping routing.GroupMappingResult) bool {
-	return media.IsGPTImageGenerationModel(requeststate.GroupMappedModel(model, mapping))
+	// The unified image check also covers registered third-party models, so a
+	// compatible image model is not offered as a chat model.
+	return media.IsImageGenerationModel(requeststate.GroupMappedModel(model, mapping))
 }
 
 // ErrorMetadata reads current request ID and model for dedicated terminal

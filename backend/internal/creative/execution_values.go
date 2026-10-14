@@ -25,7 +25,9 @@ const CreativeMaxOutputBytes = 32 << 20
 func CreativePlatformImageModel(platform, model string) bool {
 	switch platform {
 	case PlatformOpenAI:
-		return upstream.IsGPTImageGenerationModel(model)
+		// The native GPT Image family and registered third-party models share one
+		// decision, so a model the catalogue lists is not refused by the executor.
+		return IsCreativeOpenAIImageModel(model)
 	case PlatformGrok:
 		return upstream.IsGrokImageGenerationModel(model)
 	case PlatformGemini:

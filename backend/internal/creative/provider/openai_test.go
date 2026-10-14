@@ -237,3 +237,51 @@ func TestOpenAIImageBase64Preferred(t *testing.T) {
 		require.Equal(t, []byte("image"), outputs[0].Bytes)
 	})
 }
+
+// TestCreativeOpenAIRequestImageSizeByProfile maps the size field for each
+// request shape. It protects the ratio encoding: a registered ratio model sends
+// the requested ratio or the first registered one, while pixel models and GPT
+// Image keep the WIDTHxHEIGHT pair.
+func TestCreativeOpenAIRequestImageSizeByProfile(t *testing.T) {
+	require.Equal(t, "9:16", CreativeOpenAIRequestImageSize("gemini-3.1-flash-lite-image", "1K", "9:16"))
+	require.Equal(t, "1:1", CreativeOpenAIRequestImageSize("gemini-3.1-flash-lite-image", "1K", "7:5"),
+		"an unlisted ratio falls back to the first registered ratio")
+	require.Equal(t, "1536x1024", CreativeOpenAIRequestImageSize("qwen-image-2.0", "1K", "16:9"))
+	require.Equal(t, "1536x1024", CreativeOpenAIRequestImageSize("gpt-image-1", "1K", "16:9"))
+}
+
+// TestBuildCreativeOpenAIRequestBodyThirdPartyContract maps the generated body
+// for a ratio model, a base64 model and the native family. It protects the two
+// deviations: a third-party model omits output_format, and only a model whose
+// endpoint returns a URL asks for b64_json.
+func TestBuildCreativeOpenAIRequestBodyThirdPartyContract(t *testing.T) {
+	run := creative.CreativeRun{Operation: creative.CreativeOperationGenerate, ImageSize: "1K", AspectRatio: "9:16"}
+	payload := creative.CreativeRunPayload{Prompt: "draw a cat"}
+
+	body, contentType, err := BuildCreativeOpenAIRequestBody(run, payload, "gemini-3.1-flash-lite-image")
+	require.NoError(t, err)
+	require.Equal(t, "application/json", contentType)
+
+	var parsed map[string]any
+	require.NoError(t, json.Unmarshal(body, &parsed))
+	require.Equal(t, "9:16", parsed["size"])
+	require.NotContains(t, parsed, "output_format", "a third-party model must not carry output_format")
+	require.NotContains(t, parsed, "response_format", "this contract returns base64 by default")
+
+	// A model whose endpoint returns a URL needs the explicit base64 request.
+	body, _, err = BuildCreativeOpenAIRequestBody(creative.CreativeRun{
+		Operation: creative.CreativeOperationGenerate, ImageSize: "1K", AspectRatio: "16:9",
+	}, payload, "qwen-image-2.0")
+	require.NoError(t, err)
+	require.NoError(t, json.Unmarshal(body, &parsed))
+	require.Equal(t, "b64_json", parsed["response_format"])
+	require.NotContains(t, parsed, "output_format")
+	require.Equal(t, "1536x1024", parsed["size"])
+
+	// The native GPT Image family keeps its existing request.
+	body, _, err = BuildCreativeOpenAIRequestBody(run, payload, "gpt-image-1")
+	require.NoError(t, err)
+	require.NoError(t, json.Unmarshal(body, &parsed))
+	require.Equal(t, "png", parsed["output_format"])
+	require.Equal(t, "1024x1536", parsed["size"])
+}

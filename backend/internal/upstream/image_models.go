@@ -1,6 +1,10 @@
 package upstream
 
-import "strings"
+import (
+	"strings"
+
+	"github.com/TokenFlux/TokenRouter/internal/modelcatalog"
+)
 
 // Image request consumers recognize model families before selecting a platform
 // image path. Gemini names accept a models/ prefix and family suffixes, while
@@ -46,4 +50,27 @@ func IsGrokImageGenerationModel(model string) bool {
 	return model == "grok-imagine" ||
 		model == "grok-imagine-edit" ||
 		strings.HasPrefix(model, "grok-imagine-image")
+}
+
+// IsOpenAICompatImageModel reports whether model is a third-party image model
+// registered for an OpenAI-compatible endpoint. The model catalogue holds the
+// registrations, so this check follows a new entry without another list here.
+func IsOpenAICompatImageModel(model string) bool {
+	return modelcatalog.OpenAICompatImageModelFor(model) != nil
+}
+
+// IsImageGenerationModel reports whether model can serve the image entry
+// points: a native image family, a registered third-party image model, or a
+// name containing "image". Account selection, the model catalogue projection
+// and image billing share this decision, so a model listed as an image model
+// is not refused later by one of those consumers.
+func IsImageGenerationModel(model string) bool {
+	normalized := strings.ToLower(strings.TrimSpace(model))
+	if normalized == "" {
+		return false
+	}
+	return IsGPTImageGenerationModel(normalized) ||
+		IsGrokImageGenerationModel(normalized) ||
+		IsOpenAICompatImageModel(normalized) ||
+		strings.Contains(normalized, "image")
 }
